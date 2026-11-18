@@ -20,82 +20,81 @@ final class SyncStore {
     static let staleAfter: TimeInterval = 48 * 3600
 
     private(set) var tasks: [SyncTask] = []
+    /// Latest run per task id.
     private(set) var logs: [String: SyncLog] = [:]
-    /// Runs started from SyncDock (label → start time), cleared when their log appears.
+    /// Runs started from SyncDock (task id → start time), cleared when their log appears.
     private(set) var pending: [String: Date] = [:]
+    /// Tasks whose sync is running right now, however it was started.
+    private(set) var running: Set<String> = []
     private(set) var now = Date.now
     private(set) var launchAtLogin = SMAppService.mainApp.status == .enabled
     private(set) var lastError: String?
+    /// Whether SyncDock has Full Disk Access, which its background runs need.
+    private(set) var hasFullDiskAccess = FullDiskAccess.isGranted
 
-    private var logDetails: [URL: LogReader.Details] = [:]
+    /// Set for layout snapshots, so they don't depend on the permissions of whoever renders them.
+    private var accessOverride: Bool?
     private var timer: Timer?
     private var watcher: DispatchSourceFileSystemObject?
 
     init(watch: Bool = true) {
+        if watch && !Paths.isTestHome {
+            // Tasks from SyncDock 1.x (run by FreeFileSync) move over to the built-in engine.
+            LegacyImport.run()
+            TaskFiles.repairAgents(TaskLoader.loadTasks())
+        }
         refresh()
         if watch { startWatching() }
     }
 
     var overall: Overall {
-        if !pending.isEmpty { return .syncing }
+        if !pending.isEmpty || !running.isEmpty { return .syncing }
         return tasks.contains(where: needsAttention) ? .attention : .ok
     }
 
-    func isRunning(_ task: SyncTask) -> Bool { pending[task.label] != nil }
+    func isRunning(_ task: SyncTask) -> Bool { pending[task.id] != nil || running.contains(task.id) }
 
     /// Only scheduled tasks can fall behind; manual ones run when the user says so.
     func isStale(_ task: SyncTask) -> Bool {
         guard task.schedule.kind != .manual else { return false }
-        guard let log = logs[task.name] else { return true }
+        guard let log = logs[task.id] else { return true }
         return now.timeIntervalSince(log.date) > Self.staleAfter
     }
 
     func needsAttention(_ task: SyncTask) -> Bool {
-        isStale(task) || (logs[task.name].map { $0.result != .success } ?? false)
+        isStale(task) || (logs[task.id].map { $0.result != .success } ?? false)
     }
 
     func refresh() {
         now = .now
         tasks = TaskLoader.loadTasks(now: now)
-        var latest = LogReader.latestLogs(for: tasks.map(\.name))
-        for (name, log) in latest {
-            // Only cache logs that were complete: one still being written is read again next time.
-            if logDetails[log.url] == nil, let details = LogReader.details(of: log.url), details.result != nil {
-                logDetails[log.url] = details
-            }
-            guard let details = logDetails[log.url] else { continue }
-            latest[name]?.summary = LogReader.summary(details)
-            if var result = details.result {
-                // The `.git` pair's expected overlap with the main pair isn't worth flagging.
-                if result == .warning, let task = tasks.first(where: { $0.name == name }),
-                   task.excludeHidden && task.includeGit, details.onlyFolderPairOverlaps(under: task.targetPath) {
-                    result = .success
-                }
-                latest[name]?.result = result
-            }
-        }
-        logs = latest
-        freeFileSyncInstalled = FreeFileSync.appURL != nil
-        noticePermissionErrors()
+        logs = LogReader.latestLogs()
+        running = Set(tasks.map(\.id).filter(RunLock.isHeld))
+        checkSetup()
 
-        // Log files are named after the run's start time, so a log at or after
-        // the kickstart (minus clock slack) belongs to our run.
+        // Log files are named after the run's start time, so a log at or after the kickstart (minus
+        // clock slack) belongs to our run. A run that never took its lock was skipped (drive unplugged).
         for task in tasks {
-            guard let started = pending[task.label] else { continue }
-            let finished = logs[task.name].map { $0.date >= started.addingTimeInterval(-2) } ?? false
-            if finished || now.timeIntervalSince(started) > 1800 { pending[task.label] = nil }
+            guard let started = pending[task.id] else { continue }
+            let finished = logs[task.id].map { $0.date >= started.addingTimeInterval(-2) } ?? false
+            let neverStarted = !running.contains(task.id) && now.timeIntervalSince(started) > 10
+            if finished || neverStarted { pending[task.id] = nil }
         }
     }
 
     /// Runs the job right away. A missing target folder is created first: when the user starts a run
-    /// themselves that's expected, so FreeFileSync shouldn't flag it. Scheduled runs still warn, since a
+    /// themselves that's expected, so it shouldn't be flagged. Scheduled runs still warn, since a
     /// backup folder vanishing unattended is worth knowing about.
     func runNow(_ task: SyncTask) {
         guard !isRunning(task), !task.isVolumeMissing else { return }
         try? Self.createFolderIfMissing(task.targetPath)
-        if launchctl("kickstart", "gui/\(getuid())/\(task.label)") == 0 {
-            pending[task.label] = .now
+        if LaunchAgent.kickstart(label: task.label) {
+            pending[task.id] = .now
             lastError = nil
+            // Picks up the run's lock shortly after it starts.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
         } else {
             lastError = String(localized: "无法启动 \(task.name)")
         }
@@ -103,53 +102,16 @@ final class SyncStore {
 
     // MARK: Setup
 
-    enum Permission { case unknown, checking, granted, denied }
+    var setupComplete: Bool { hasFullDiskAccess }
 
-    private static let verifiedAtKey = "fullDiskAccessVerifiedAt"
-
-    private(set) var freeFileSyncInstalled = FreeFileSync.appURL != nil
-    /// Whether FreeFileSync has Full Disk Access, remembered from the last successful check.
-    private(set) var permission: Permission =
-        UserDefaults.standard.object(forKey: SyncStore.verifiedAtKey) == nil ? .unknown : .granted
-
-    var setupComplete: Bool { freeFileSyncInstalled && permission == .granted }
-
-    /// Re-detects FreeFileSync and, unless already verified (or `force`), probes its permission.
-    func checkSetup(force: Bool = false) async {
-        freeFileSyncInstalled = FreeFileSync.appURL != nil
-        guard freeFileSyncInstalled, permission != .checking, force || permission != .granted else { return }
-        permission = .checking
-        switch await PermissionProbe.run() {
-        case .granted:
-            permission = .granted
-            UserDefaults.standard.set(Date.now, forKey: Self.verifiedAtKey)
-        case .denied:
-            permission = .denied
-            UserDefaults.standard.removeObject(forKey: Self.verifiedAtKey)
-        case .unknown:
-            permission = .unknown
-        }
+    func checkSetup() {
+        hasFullDiskAccess = accessOverride ?? FullDiskAccess.isGranted
     }
 
-    #if DEBUG
     /// Forces a setup state for layout snapshots.
-    func previewSetup(installed: Bool, permission: Permission) {
-        freeFileSyncInstalled = installed
-        self.permission = permission
-    }
-    #endif
-
-    /// A run that failed with EPERM after the last successful check means access was revoked.
-    private func noticePermissionErrors() {
-        guard permission == .granted,
-              let verifiedAt = UserDefaults.standard.object(forKey: Self.verifiedAtKey) as? Date else { return }
-        for log in logs.values where log.result != .success && log.date > verifiedAt {
-            if logDetails[log.url]?.permissionDenied == true {
-                permission = .denied
-                UserDefaults.standard.removeObject(forKey: Self.verifiedAtKey)
-                return
-            }
-        }
+    func previewSetup(granted: Bool) {
+        accessOverride = granted
+        hasFullDiskAccess = granted
     }
 
     // MARK: Editing
@@ -166,51 +128,29 @@ final class SyncStore {
     }
 
     func validationError() -> String? {
-        draft.validationError(existingBatchURLs: tasks.map(\.batchURL))
+        draft.validationError(existing: tasks)
     }
 
-    /// Writes the batch job and launch agent for `draft`, then (re)loads the agent.
-    /// Returns the saved task's label.
+    /// Saves the task and (re)loads its launch agent. Returns the saved task.
     @discardableResult
-    func saveDraft() throws -> String {
-        let draft = self.draft
-        let label = draft.label ?? LaunchAgent.newLabel()
-        let fm = FileManager.default
-        try fm.createDirectory(at: Paths.jobs, withIntermediateDirectories: true)
-
-        // Create the destination up front so FreeFileSync doesn't warn about a missing folder.
-        try Self.createFolderIfMissing(draft.effectiveTarget)
-
-        var batch = try draft.originalBatchURL.map(BatchFile.init(url:)) ?? BatchFile()
-        batch.apply(draft, isNew: draft.isNew)
-        try batch.write(to: draft.batchURL)
-        // Renamed: drop the old file (to the Trash, so it can be recovered).
-        if let old = draft.originalBatchURL, old.standardizedFileURL != draft.batchURL.standardizedFileURL {
-            try? fm.trashItem(at: old, resultingItemURL: nil)
-        }
-
-        let agentURL = LaunchAgent.url(for: label)
-        try LaunchAgent.write(LaunchAgent.plist(label: label, batchURL: draft.batchURL, draft: draft), to: agentURL)
-        try reload(label: label, agentURL: agentURL)
-
-        self.draft.label = label
-        self.draft.originalBatchURL = draft.batchURL
+    func saveDraft() throws -> SyncTask {
+        let task = draft.task(id: draft.id ?? SyncTask.newID())
+        // Create the destination up front so the first run doesn't warn about a missing folder.
+        try Self.createFolderIfMissing(task.targetPath)
+        try TaskFiles.save(task)
+        draft.id = task.id
         refresh()
-        return label
+        return task
     }
 
-    /// Unloads the task and moves its launch agent and batch job to the Trash.
     func delete(_ task: SyncTask) {
-        let fm = FileManager.default
-        launchctl("bootout", "gui/\(getuid())/\(task.label)")
-        try? fm.trashItem(at: LaunchAgent.url(for: task.label), resultingItemURL: nil)
-        try? fm.trashItem(at: task.batchURL, resultingItemURL: nil)
-        pending[task.label] = nil
+        TaskFiles.delete(task)
+        pending[task.id] = nil
         refresh()
     }
 
-    func runNow(label: String) {
-        if let task = tasks.first(where: { $0.label == label }) { runNow(task) }
+    func runNow(id: String) {
+        if let task = tasks.first(where: { $0.id == id }) { runNow(task) }
     }
 
     /// Creates `path` when only its last component is missing. Deeper gaps (e.g. an unplugged
@@ -223,55 +163,8 @@ final class SyncStore {
         try fm.createDirectory(at: url, withIntermediateDirectories: false)
     }
 
-    private func reload(label: String, agentURL: URL) throws {
-        let domain = "gui/\(getuid())"
-        launchctl("bootout", "\(domain)/\(label)")
-        // bootout finishes asynchronously; bootstrap fails with EIO until it has.
-        for _ in 0..<20 {
-            if launchctl("bootstrap", domain, agentURL.path(percentEncoded: false)) == 0 { return }
-            Thread.sleep(forTimeInterval: 0.15)
-        }
-        throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: String(localized: "无法加载定时任务 \(label)")])
-    }
-
-    @discardableResult
-    private func launchctl(_ args: String...) -> Int32 {
-        let process = Process()
-        process.executableURL = URL(filePath: "/bin/launchctl")
-        process.arguments = args
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus
-        } catch {
-            return -1
-        }
-    }
-
-    func openLog(_ task: SyncTask) {
-        guard let url = logs[task.name]?.url else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    /// Opens the batch job in FreeFileSync's editor without running it.
-    func edit(_ task: SyncTask) {
-        let config = NSWorkspace.OpenConfiguration()
-        config.arguments = ["-edit", task.batchURL.path(percentEncoded: false)]
-        config.createsNewApplicationInstance = true
-        guard let app = FreeFileSync.appURL else { return }
-        NSWorkspace.shared.openApplication(at: app, configuration: config)
-    }
-
-    func openFreeFileSync() {
-        guard let app = FreeFileSync.appURL else { return }
-        NSWorkspace.shared.openApplication(at: app, configuration: .init())
-    }
-
-    func openLogsFolder() {
-        NSWorkspace.shared.open(Paths.logs)
-    }
+    /// The task shown in the history window.
+    var historyTaskID: String?
 
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
@@ -285,6 +178,7 @@ final class SyncStore {
 
     private func startWatching() {
         // New log files appear when a run finishes; refresh right away.
+        try? FileManager.default.createDirectory(at: Paths.logs, withIntermediateDirectories: true)
         let fd = open(Paths.logs.path(percentEncoded: false), O_EVTONLY)
         if fd >= 0 {
             let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
@@ -295,8 +189,8 @@ final class SyncStore {
             source.resume()
             watcher = source
         }
-        // Keeps relative times, volume state and run timeouts current.
-        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+        // Keeps relative times, volume state, running syncs and permissions current.
+        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)

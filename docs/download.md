@@ -23,9 +23,7 @@ macOS 15 或更高版本 · Apple 芯片和 Intel Mac 均可 · 中文 / English
 
 1. **下载并安装**：打开下载的 DMG，把 SyncDock 拖进「应用程序」文件夹。
 2. **打开 SyncDock**：它会出现在屏幕右上角的菜单栏里，并弹出设置引导。
-3. **按引导完成设置**：
-   - 安装免费的 [FreeFileSync](https://freefilesync.org/download.php)（SyncDock 用它执行同步）
-   - 在系统设置里允许 FreeFileSync 访问所有文件
+3. **按引导完成设置**：在系统设置里允许 SyncDock 访问所有文件。不需要另外安装任何软件。
 
 完成后，点菜单栏图标里的 ＋ 新建第一个同步任务。
 
@@ -34,17 +32,17 @@ macOS 15 或更高版本 · Apple 芯片和 Intel Mac 均可 · 中文 / English
 **SyncDock 安全吗？**
 SyncDock 经过 Apple 公证，打开时不会被系统拦截，源代码也完全公开。默认的「更新」模式只会往备份里添加和更新文件，从不删除。
 
-**为什么还要装 FreeFileSync？**
-FreeFileSync 是一款成熟的免费开源同步软件，已经发展了十多年。SyncDock 把它的同步能力包装成更简单的界面，并负责定时运行。安装后不需要打开它。
+**为什么要给 SyncDock「完全磁盘访问权限」？**
+定时同步在后台进行，没有人能点「允许」。提前授权，SyncDock 才能读取你的桌面、文稿和移动硬盘。
 
-**为什么要给 FreeFileSync「完全磁盘访问权限」？**
-定时同步在后台进行，没有人能点「允许」。提前授权，FreeFileSync 才能读取你的桌面、文稿和移动硬盘。SyncDock 本身不需要这个权限。
+**之前用的是 1.x（需要 FreeFileSync）怎么办？**
+直接安装新版本即可。第一次打开时，原有任务会自动迁移过来，设置保持不变。授予 SyncDock「完全磁盘访问权限」后，就可以卸载 FreeFileSync 了。
 
 **可以同步到 OneDrive、iCloud 等云盘吗？**
 可以。选择云盘在 Mac 上的文件夹作为目标即可，云盘客户端会负责上传。
 
 **支持双向同步吗？**
-SyncDock 的界面提供「更新」和「镜像」两种单向同步。需要双向同步时，可以在任务的「高级设置」里用 FreeFileSync 设置，SyncDock 会保留这些设置。
+不支持。SyncDock 提供「更新」和「镜像」两种单向同步，适合把文件夹备份到另一个地方。
 
 **界面支持英文吗？**
 支持。SyncDock 有中文和英文界面，会自动跟随系统语言。
@@ -55,6 +53,15 @@ SyncDock 的界面提供「更新」和「镜像」两种单向同步。需要�
 ---
 
 ## 版本记录
+
+### 2.0
+
+- 内置同步引擎，不再需要安装 FreeFileSync
+- 1.x 的任务在第一次打开时自动迁移
+- 镜像保护：源文件夹不存在或为空时不会清空备份
+- 新的「同步记录」窗口：每次同步的结果、新增 / 更新 / 删除数量、错误和可搜索的变动文件列表
+- 同步出错时发通知；菜单栏也会显示定时同步正在进行
+- 「完全磁盘访问权限」改为授予 SyncDock 本身
 
 ### 1.0
 
@@ -69,4 +76,4 @@ SyncDock 的界面提供「更新」和「镜像」两种单向同步。需要�
 
 ---
 
-<sub>SyncDock 是开源软件，以 MIT 许可发布，源代码见 [GitHub](https://github.com/yuting-ai/SyncDock)。SyncDock 是独立开发的工具，与 FreeFileSync 及其开发者无关。FreeFileSync 是 Zenju 的软件，以 GPL-3.0 许可发布。</sub>
+<sub>SyncDock 是开源软件，以 MIT 许可发布，源代码见 [GitHub](https://github.com/yuting-ai/SyncDock)。</sub>

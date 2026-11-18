@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// First-run checklist: FreeFileSync installed, FreeFileSync has Full Disk Access, optional login item.
+/// First-run checklist: SyncDock has Full Disk Access, optional login item.
 struct SetupView: View {
     let store: SyncStore
     @Environment(\.dismissWindow) private var dismissWindow
+    /// Set once the user has pressed "检查" without success, to explain what may be missing.
+    @State private var checkedAndDenied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -13,7 +15,7 @@ struct SetupView: View {
                     .foregroundStyle(Color.accentColor)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("欢迎使用 SyncDock").font(.title2.bold())
-                    Text("SyncDock 借助 FreeFileSync 在后台同步文件。开始之前，先完成下面两步。")
+                    Text("SyncDock 会按计划在后台同步文件夹。开始之前，先完成下面这一步。")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -22,7 +24,6 @@ struct SetupView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 22) {
-                installStep
                 permissionStep
                 loginStep
             }
@@ -43,83 +44,49 @@ struct SetupView: View {
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .navigationTitle("设置 SyncDock")
-        // Coming back from System Settings or a download: check again without making the user click.
+        // Coming back from System Settings: check again without making the user click.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await store.checkSetup() }
+            store.checkSetup()
         }
-        .task { await store.checkSetup() }
-    }
-
-    private var installStep: some View {
-        Step(number: 1, title: "安装 FreeFileSync", state: store.freeFileSyncInstalled ? .done : .todo) {
-            if store.freeFileSyncInstalled {
-                Group {
-                    if let version = FreeFileSync.version {
-                        Text("已安装 FreeFileSync \(version)")
-                    } else {
-                        Text("已安装")
-                    }
-                }
-                .foregroundStyle(.secondary)
-            } else {
-                Text("FreeFileSync 是免费开源的同步工具，SyncDock 用它来执行同步。下载后打开安装包，按提示安装即可。")
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Button("下载 FreeFileSync") { NSWorkspace.shared.open(FreeFileSync.downloadURL) }
-                    Button("已经装好了，重新检查") { Task { await store.checkSetup() } }
-                }
-            }
-        }
+        .task { store.checkSetup() }
     }
 
     private var permissionStep: some View {
-        Step(number: 2, title: "允许 FreeFileSync 访问所有文件", state: permissionState) {
-            switch store.permission {
-            case _ where !store.freeFileSyncInstalled:
-                Text("装好 FreeFileSync 后再做这一步。").foregroundStyle(.secondary)
-            case .granted:
-                Text("已确认 FreeFileSync 拥有「完全磁盘访问权限」。").foregroundStyle(.secondary)
-            case .checking:
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("正在检查…").foregroundStyle(.secondary)
-                }
-            case .unknown, .denied:
-                Text("定时同步在后台运行，没人能点「允许」，所以要提前授权，FreeFileSync 才能读取桌面、文稿和移动硬盘。")
+        Step(number: 1, title: "允许 SyncDock 访问所有文件", state: permissionState) {
+            if store.hasFullDiskAccess {
+                Text("已确认 SyncDock 拥有「完全磁盘访问权限」。").foregroundStyle(.secondary)
+            } else {
+                Text("定时同步在后台运行，没人能点「允许」，所以要提前授权，SyncDock 才能读取桌面、文稿和移动硬盘。")
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("1. 点「打开系统设置」")
-                    Text("2. 点列表下方的 ＋，在「应用程序」里选择 FreeFileSync")
-                    Text("3. 打开 FreeFileSync 旁边的开关，然后回到这里")
+                    Text("2. 点列表下方的 ＋，在「应用程序」里选择 SyncDock")
+                    Text("3. 打开 SyncDock 旁边的开关，然后回到这里")
                 }
                 .font(.callout)
-                if store.permission == .denied {
-                    Label("还没有权限。如果刚打开开关，FreeFileSync 正在运行的话需要先退出它。",
+                if checkedAndDenied {
+                    Label("还没有权限。如果开关已经打开，请退出 SyncDock 再重新打开。",
                           systemImage: "xmark.circle.fill")
                         .font(.callout)
                         .foregroundStyle(.red)
                 }
                 HStack {
-                    Button("打开系统设置") { NSWorkspace.shared.open(FreeFileSync.fullDiskAccessSettings) }
-                    Button("检查") { Task { await store.checkSetup(force: true) } }
+                    Button("打开系统设置") { NSWorkspace.shared.open(FullDiskAccess.settingsURL) }
+                    Button("检查") {
+                        store.checkSetup()
+                        checkedAndDenied = !store.hasFullDiskAccess
+                    }
                 }
             }
         }
-        .disabled(!store.freeFileSyncInstalled)
-        .opacity(store.freeFileSyncInstalled ? 1 : 0.5)
     }
 
     private var permissionState: Step.State {
-        guard store.freeFileSyncInstalled else { return .todo }
-        return switch store.permission {
-        case .granted: .done
-        case .denied: .failed
-        case .checking, .unknown: .todo
-        }
+        store.hasFullDiskAccess ? .done : checkedAndDenied ? .failed : .todo
     }
 
     private var loginStep: some View {
-        Step(number: 3, title: "登录时自动启动 SyncDock（推荐）", state: store.launchAtLogin ? .done : .optional) {
+        Step(number: 2, title: "登录时自动启动 SyncDock（推荐）", state: store.launchAtLogin ? .done : .optional) {
             Toggle("开机登录后在菜单栏显示同步状态", isOn: Binding(get: { store.launchAtLogin },
                                                       set: { store.setLaunchAtLogin($0) }))
                 .toggleStyle(.checkbox)

@@ -1,27 +1,120 @@
 import Foundation
 
-/// One FreeFileSync batch job run by a `local.freefilesync.*` launch agent.
-struct SyncTask: Identifiable, Equatable {
-    let label: String
-    let name: String
-    let batchURL: URL
-    let schedule: Schedule
-    /// Volume that must be mounted for the job to run (nil for local/cloud targets).
-    let requiredVolume: String?
-    /// Full folder paths; use `TaskLoader.shorten` for display.
-    let sourcePath: String
-    let targetPath: String
-    let mode: SyncMode
-    let excludeHidden: Bool
-    let includeGit: Bool
+enum SyncMode: String, CaseIterable, Identifiable, Codable {
+    /// Copy new and changed files to the target, never delete there.
+    case update
+    /// Make the target identical to the source, deleting extra files.
+    case mirror
 
-    var id: String { label }
+    var id: Self { self }
+}
+
+/// When launchd starts a job. Weekdays use launchd numbering: 1 = Monday … 7 = Sunday.
+struct Schedule: Equatable, Codable {
+    enum Kind: String, CaseIterable, Identifiable, Codable {
+        case manual, daily, weekly
+        var id: Self { self }
+    }
+
+    var kind: Kind = .daily
+    var hour = 21
+    var minute = 0
+    var weekdays: Set<Int> = [7]
+
+    init() {}
+
+    /// Parses a `StartCalendarInterval` value (missing, one dict, or an array of dicts).
+    init(plistValue: Any?) {
+        let entries: [[String: Int]] = switch plistValue {
+        case let dict as [String: Int]: [dict]
+        case let array as [[String: Int]]: array
+        default: []
+        }
+        guard let first = entries.first else {
+            kind = .manual
+            return
+        }
+        hour = first["Hour"] ?? 0
+        minute = first["Minute"] ?? 0
+        let days = entries.compactMap { $0["Weekday"] }.map { $0 == 0 ? 7 : $0 }
+        if days.isEmpty {
+            kind = .daily
+        } else {
+            kind = .weekly
+            weekdays = Set(days)
+        }
+    }
+
+    /// The `StartCalendarInterval` value, or nil for manual-only jobs.
+    var plistValue: Any? {
+        switch kind {
+        case .manual: nil
+        case .daily: ["Hour": hour, "Minute": minute]
+        case .weekly: weekdays.sorted().map { ["Weekday": $0, "Hour": hour, "Minute": minute] }
+        }
+    }
+
+    func nextRun(after date: Date) -> Date? {
+        let cal = Calendar.current
+        switch kind {
+        case .manual:
+            return nil
+        case .daily:
+            return cal.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute),
+                                matchingPolicy: .nextTime)
+        case .weekly:
+            // Calendar weekdays start at Sunday = 1.
+            return weekdays.compactMap { day in
+                cal.nextDate(after: date,
+                             matching: DateComponents(hour: hour, minute: minute, weekday: day % 7 + 1),
+                             matchingPolicy: .nextTime)
+            }.min()
+        }
+    }
+}
+
+/// A sync task, stored as `Tasks/<id>.json` and run by the launch agent `<labelPrefix><id>`.
+struct SyncTask: Identifiable, Equatable, Codable {
+    var id: String
+    var name: String
+    var sourcePath: String
+    /// The folder the user picked; see `targetPath` for where files actually go.
+    var targetFolder: String
+    /// Sync into `targetFolder/<source folder name>` instead of straight into `targetFolder`.
+    var createSubfolder: Bool
+    var mode: SyncMode
+    var excludeHidden: Bool
+    var includeGit: Bool
+    var schedule: Schedule
+
+    static func newID() -> String {
+        "task-" + UUID().uuidString.prefix(8).lowercased()
+    }
+
+    var label: String { Paths.labelPrefix + id }
+
+    /// The folder files are written into.
+    var targetPath: String {
+        Self.effectiveTarget(source: sourcePath, target: targetFolder, createSubfolder: createSubfolder)
+    }
+
     var source: String { TaskLoader.shorten(sourcePath) }
     var target: String { TaskLoader.shorten(targetPath) }
 
+    /// Volume that must be mounted for the job to run (nil for local/cloud targets).
+    var requiredVolume: String? {
+        Self.requiredVolume(source: sourcePath, target: targetPath)
+    }
+
     var isVolumeMissing: Bool {
-        guard let requiredVolume else { return false }
+        // Snapshots show demo tasks on made-up drives as connected.
+        guard let requiredVolume, !Main.isSnapshot else { return false }
         return !FileManager.default.fileExists(atPath: requiredVolume)
+    }
+
+    /// Cloud folders refuse moving files to the Trash, so deletions there are permanent.
+    var deletesPermanently: Bool {
+        targetPath.contains("/Library/CloudStorage/")
     }
 
     func nextRun(after date: Date = .now) -> Date? {
@@ -29,13 +122,72 @@ struct SyncTask: Identifiable, Equatable {
     }
 
     var draft: TaskDraft {
-        // A target named like the source folder was set up as "target/<source name>".
-        let targetURL = URL(filePath: targetPath)
-        let nested = !sourcePath.isEmpty && targetURL.lastPathComponent == URL(filePath: sourcePath).lastPathComponent
-        return TaskDraft(label: label, originalBatchURL: batchURL, name: name, source: sourcePath,
-                         target: nested ? targetURL.deletingLastPathComponent().folderPath : targetPath,
-                         createSubfolder: nested, mode: mode, excludeHidden: excludeHidden,
-                         includeGit: includeGit, schedule: schedule)
+        TaskDraft(id: id, name: name, source: sourcePath, target: targetFolder, createSubfolder: createSubfolder,
+                  mode: mode, excludeHidden: excludeHidden, includeGit: includeGit, schedule: schedule)
+    }
+
+    static func effectiveTarget(source: String, target: String, createSubfolder: Bool) -> String {
+        guard createSubfolder, !source.isEmpty, !target.isEmpty else { return target }
+        return URL(filePath: target).appending(path: URL(filePath: source).lastPathComponent).folderPath
+    }
+
+    /// The mount point a task depends on: the target's volume, else the source's.
+    static func requiredVolume(source: String, target: String) -> String? {
+        for path in [target, source] {
+            let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+            if parts.count >= 2, parts[0] == "Volumes" { return "/Volumes/\(parts[1])" }
+        }
+        return nil
+    }
+}
+
+/// The editable fields of a task, as shown in the editor.
+struct TaskDraft: Equatable {
+    /// nil for a task that does not exist yet.
+    var id: String?
+    var name = ""
+    var source = ""
+    /// The folder the user picked; see `effectiveTarget` for where files actually go.
+    var target = ""
+    var createSubfolder = true
+    var mode: SyncMode = .update
+    var excludeHidden = true
+    var includeGit = false
+    var schedule = Schedule()
+
+    var isNew: Bool { id == nil }
+
+    var sourceFolderName: String { URL(filePath: source).lastPathComponent }
+
+    var effectiveTarget: String {
+        SyncTask.effectiveTarget(source: source, target: target, createSubfolder: createSubfolder)
+    }
+
+    var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+
+    func task(id: String) -> SyncTask {
+        SyncTask(id: id, name: trimmedName, sourcePath: source, targetFolder: target,
+                 createSubfolder: createSubfolder, mode: mode, excludeHidden: excludeHidden,
+                 includeGit: includeGit, schedule: schedule)
+    }
+
+    /// A message describing what still needs fixing, or nil when the draft can be saved.
+    func validationError(existing: [SyncTask]) -> String? {
+        if trimmedName.isEmpty { return String(localized: "请填写任务名称") }
+        if source.isEmpty { return String(localized: "请选择源文件夹") }
+        if target.isEmpty { return String(localized: "请选择目标文件夹") }
+        let s = URL(filePath: source).standardizedFileURL.path(percentEncoded: false)
+        let t = URL(filePath: effectiveTarget).standardizedFileURL.path(percentEncoded: false)
+        if s == t { return String(localized: "源文件夹和目标文件夹不能相同") }
+        if t.hasPrefix(s.hasSuffix("/") ? s : s + "/") { return String(localized: "目标文件夹不能放在源文件夹里面") }
+        if s.hasPrefix(t.hasSuffix("/") ? t : t + "/") { return String(localized: "源文件夹不能放在目标文件夹里面") }
+        if schedule.kind == .weekly && schedule.weekdays.isEmpty { return String(localized: "请至少选择一天") }
+        let normalized = trimmedName.precomposedStringWithCanonicalMapping.lowercased()
+        let clash = existing.contains {
+            $0.id != id && $0.name.precomposedStringWithCanonicalMapping.lowercased() == normalized
+        }
+        if clash { return String(localized: "已经有同名的任务了") }
+        return nil
     }
 }
 
@@ -47,38 +199,100 @@ extension URL {
     }
 }
 
+/// The result of the latest run of a task.
 struct SyncLog: Equatable {
-    enum Result { case success, warning, error }
+    enum Result: String, Codable { case success, warning, error }
 
+    /// The run's record file.
     let url: URL
     let date: Date
-    /// From the file name; replaced by the log's own result icon once it has been read.
     var result: Result
-    /// e.g. "75 项 · 1.64 GB", nil when the log could not be summarised.
+    /// e.g. "75 项 · 1.64 GB", nil when the run copied nothing countable.
     var summary: String?
+}
+
+/// One change a run made in the target.
+struct Change: Codable, Hashable {
+    enum Kind: String, Codable, CaseIterable {
+        case added, updated, folder, renamed, trashed, deleted
+    }
+
+    var kind: Kind
+    /// Relative to the target folder.
+    var path: String
+    /// The previous name, for renames.
+    var from: String?
+    var isFolder: Bool?
+    var bytes: Int64?
+}
+
+/// A run's full list of changes, saved as `<id> <start>.changes.json` and read only when shown.
+struct ChangeList: Codable {
+    static let limit = 5000
+
+    var changes: [Change]
+    /// Changes beyond `limit`, counted but not listed.
+    var omitted: Int
+}
+
+/// What a run did, saved as `<id> <start>.json`.
+struct RunRecord: Codable, Equatable {
+    var start: Date
+    var end: Date
+    var result: SyncLog.Result
+    var items: Int
+    var bytes: Int64
+    var errors: [String]
+    var warnings: [String]
+    /// Changes per `Change.Kind` raw value.
+    var counts: [String: Int]?
+    var source: String?
+    var target: String?
+    var mode: SyncMode?
+
+    func count(_ kinds: Change.Kind...) -> Int {
+        kinds.reduce(0) { $0 + (counts?[$1.rawValue] ?? 0) }
+    }
+
+    var duration: TimeInterval { end.timeIntervalSince(start) }
+
+    /// e.g. "75 项 · 1.64 GB", or "无变化" when nothing was changed.
+    var summary: String {
+        if items == 0 { return String(localized: "无变化") }
+        var parts = [String(localized: "\(items) 项")]
+        if bytes > 0 { parts.append(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// A run in a task's history.
+struct RunEntry: Identifiable, Equatable {
+    let url: URL
+    let record: RunRecord
+    var id: URL { url }
+
+    var changesURL: URL { LogReader.changesURL(for: url) }
 }
 
 enum Paths {
     static let home = FileManager.default.homeDirectoryForCurrentUser
-    /// `SYNCDOCK_AGENTS` overrides where tasks are read from, for screenshots with demo tasks.
-    static let launchAgents = ProcessInfo.processInfo.environment["SYNCDOCK_AGENTS"].map { URL(filePath: $0) }
-        ?? home.appending(path: "Library/LaunchAgents")
-    /// `SYNCDOCK_LOGS` overrides the log folder, for previewing states without touching real logs.
-    static let logs = ProcessInfo.processInfo.environment["SYNCDOCK_LOGS"].map { URL(filePath: $0) }
-        ?? home.appending(path: "Library/Application Support/FreeFileSync/Logs")
-    static let labelPrefix = "local.freefilesync."
-    /// Where SyncDock keeps the batch jobs it creates.
-    static let jobs = home.appending(path: "FreeFileSync")
+    /// `SYNCDOCK_HOME` overrides where tasks and logs are kept, for screenshots and tests.
+    static let support = ProcessInfo.processInfo.environment["SYNCDOCK_HOME"].map { URL(filePath: $0) }
+        ?? home.appending(path: "Library/Application Support/SyncDock")
+    /// Demo or test data: launch agents, which are shared with the real tasks, are left alone.
+    static let isTestHome = ProcessInfo.processInfo.environment["SYNCDOCK_HOME"] != nil
+    static let tasks = support.appending(path: "Tasks")
+    static let logs = support.appending(path: "Logs")
+    static let launchAgents = home.appending(path: "Library/LaunchAgents")
+    static let labelPrefix = "me.lepton.syncdock."
 }
 
 enum TaskLoader {
-    /// Reads every `local.freefilesync.*.plist` launch agent.
     static func loadTasks(now: Date = .now) -> [SyncTask] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: Paths.launchAgents,
-                                                                  includingPropertiesForKeys: nil)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(at: Paths.tasks, includingPropertiesForKeys: nil)) ?? []
         return files
-            .filter { $0.lastPathComponent.hasPrefix(Paths.labelPrefix) && $0.pathExtension == "plist" }
-            .compactMap(loadTask)
+            .filter { $0.pathExtension == "json" }
+            .compactMap { try? JSONDecoder().decode(SyncTask.self, from: Data(contentsOf: $0)) }
             .sorted {
                 // Soonest scheduled first, then manual-only jobs by name.
                 let (a, b) = ($0.nextRun(after: now) ?? .distantFuture, $1.nextRun(after: now) ?? .distantFuture)
@@ -86,28 +300,12 @@ enum TaskLoader {
             }
     }
 
-    private static func loadTask(from url: URL) -> SyncTask? {
-        guard let data = try? Data(contentsOf: url),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let label = plist["Label"] as? String,
-              let args = plist["ProgramArguments"] as? [String],
-              let batchPath = args.last
-        else { return nil }
+    static func load(id: String) -> SyncTask? {
+        try? JSONDecoder().decode(SyncTask.self, from: Data(contentsOf: url(for: id)))
+    }
 
-        // Arguments are: /bin/sh -c <script> sh <volume> <batch>
-        let volume = args.count >= 6 ? args[args.count - 2] : ""
-        let batchURL = URL(filePath: batchPath)
-        let batch = try? BatchFile(url: batchURL)
-        return SyncTask(label: label,
-                        name: batchURL.deletingPathExtension().lastPathComponent,
-                        batchURL: batchURL,
-                        schedule: Schedule(plistValue: plist["StartCalendarInterval"]),
-                        requiredVolume: volume.isEmpty ? nil : volume,
-                        sourcePath: batch?.source ?? "",
-                        targetPath: batch?.target ?? "",
-                        mode: batch?.mode ?? .custom,
-                        excludeHidden: batch?.excludeHidden ?? false,
-                        includeGit: batch?.includeGit ?? false)
+    static func url(for id: String) -> URL {
+        Paths.tasks.appending(path: id + ".json")
     }
 
     /// Makes paths readable: "桌面/Mphil", "SSD-BAI/BityDev/BityDev", "OneDrive-Curtin/…/Mphil".
@@ -125,124 +323,76 @@ enum TaskLoader {
     }
 }
 
+/// Run logs: `<id> <yyyy-MM-dd HHmmss.SSS>.json` (a `RunRecord`) and `.changes.json` (a `ChangeList`),
+/// written when a run ends.
 enum LogReader {
-    // "<name> 2026-10-10 092842.502.html" or "... [Warning].html" / "... [Error].html"
-    private static let pattern = /^(\d{4}-\d{2}-\d{2} \d{6})\.\d{3}(?: \[(\w+)\])?\.html$/
+    private static let pattern = /^(task-[0-9a-z-]+) (\d{4}-\d{2}-\d{2} \d{6}\.\d{3})\.json$/
 
-    private static let fileDate: DateFormatter = {
+    static let fileDate: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd HHmmss"
+        f.dateFormat = "yyyy-MM-dd HHmmss.SSS"
         return f
     }()
 
-    /// Latest log per task name. Names are compared in NFC since file names may be decomposed.
-    static func latestLogs(for names: [String]) -> [String: SyncLog] {
+    static func baseName(id: String, start: Date) -> String {
+        "\(id) \(fileDate.string(from: start))"
+    }
+
+    static func changesURL(for recordURL: URL) -> URL {
+        recordURL.deletingPathExtension().appendingPathExtension("changes.json")
+    }
+
+    /// Record files per task id, oldest first.
+    static func records() -> [String: [URL]] {
         let files = (try? FileManager.default.contentsOfDirectory(atPath: Paths.logs.path(percentEncoded: false))) ?? []
-        var result: [String: SyncLog] = [:]
-        for file in files {
-            let nfc = file.precomposedStringWithCanonicalMapping
-            for name in names {
-                let prefix = name.precomposedStringWithCanonicalMapping + " "
-                guard nfc.hasPrefix(prefix),
-                      let match = try? pattern.wholeMatch(in: String(nfc.dropFirst(prefix.count))),
-                      let date = fileDate.date(from: String(match.1))
-                else { continue }
-                if let existing = result[name], existing.date >= date { continue }
-                let status: SyncLog.Result = switch match.2.map(String.init) {
-                case nil: .success
-                case "Warning": .warning
-                default: .error
-                }
-                result[name] = SyncLog(url: Paths.logs.appending(path: file), date: date, result: status)
-            }
+        var result: [String: [URL]] = [:]
+        for file in files.sorted() {
+            guard let match = try? pattern.wholeMatch(in: file) else { continue }
+            result[String(match.1), default: []].append(Paths.logs.appending(path: file))
         }
         return result
     }
 
-    /// What a log says, read from its HTML structure rather than its wording: FreeFileSync writes
-    /// logs in its own UI language, but the icon file names and the numbers are the same in all of them.
-    struct Details {
-        var result: SyncLog.Result?
-        var processedCount: Int?
-        /// e.g. "1.64 GB"; unit names may be in FreeFileSync's language.
-        var processedSize: String?
-        /// Messages next to an error icon in the log's message list.
-        var errors: [String]
-        /// Messages next to a warning icon, one line per `<br>`.
-        var warnings: [String] = []
-
-        var permissionDenied: Bool { errors.contains { $0.contains("EPERM") } }
-
-        /// Whether every warning is FreeFileSync's "files synced as part of multiple folder pairs",
-        /// listing only paths under `target`. A task that keeps `.git` uses a second pair with the same
-        /// folders, so both pairs create each new project folder and FreeFileSync warns about it. Batch
-        /// jobs can't turn that check off, so it's recognised here instead: the warning lists every
-        /// written path as "<base folder> 💾 <relative path>", and the 💾 mark is the same in every language.
-        func onlyFolderPairOverlaps(under target: String) -> Bool {
-            !warnings.isEmpty && warnings.allSatisfy { message in
-                let lines = message.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-                // 👓 marks a pair that only reads the path; that's a different kind of dependency.
-                guard !lines.contains(where: { $0.contains(" 👓 ") }) else { return false }
-                let written = lines.filter { $0.contains(" 💾 ") }
-                return !written.isEmpty && written.allSatisfy {
-                    $0.components(separatedBy: " 💾 ").first?.trimmingCharacters(in: .whitespaces) == target
-                }
-            }
-        }
+    static func record(at url: URL) -> RunRecord? {
+        try? decoder.decode(RunRecord.self, from: Data(contentsOf: url))
     }
 
-    /// Reads the first 16 KB of a log, where the summary and the errors and warnings sit
-    /// (logs of big runs can be several MB).
-    static func details(of url: URL) -> Details? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: 16_384), !data.isEmpty else { return nil }
-        return details(html: String(decoding: data, as: UTF8.self))
+    /// The latest run per task id.
+    static func latestLogs() -> [String: SyncLog] {
+        var result: [String: SyncLog] = [:]
+        for (id, urls) in records() {
+            guard let url = urls.last, let record = record(at: url) else { continue }
+            result[id] = SyncLog(url: url, date: record.start, result: record.result, summary: record.summary)
+        }
+        return result
     }
 
-    static func details(html: String) -> Details {
-        var details = Details(errors: [])
-        if html.contains("images/log/result-error") || html.contains("images/log/result-cancel") {
-            details.result = .error
-        } else if html.contains("images/log/result-warning") {
-            details.result = .warning
-        } else if html.contains("images/log/result-succes") {
-            details.result = .success
-        }
-
-        // Summary row: <img …file.png …></td> <td><span …>75</span> (1.64 GB)</td>
-        if let cell = html.firstMatch(of: /images\/log\/file\.png"[^>]*><\/td>\s*<td>(.*?)<\/td>/.dotMatchesNewlines()) {
-            let text = plainText(String(cell.1))
-            let count = text.prefix { $0 != "(" }.filter(\.isNumber)
-            details.processedCount = Int(count)
-            if let size = text.firstMatch(of: /\(([^)]*)\)/) { details.processedSize = String(size.1) }
-        }
-
-        // Message rows use 16-pixel icons; the summary table's are 24 pixels. Errors are listed once in
-        // the "errors and warnings" section and again in the full log, so keep each message once.
-        for row in html.matches(of: /images\/log\/msg-error\.png" width="16"[^>]*><\/td>\s*<td>(.*?)<\/td>/.dotMatchesNewlines()) {
-            let message = plainText(String(row.1))
-            if !details.errors.contains(message) { details.errors.append(message) }
-        }
-        for row in html.matches(of: /images\/log\/msg-warning\.png" width="16"[^>]*><\/td>\s*<td>(.*?)<\/td>/.dotMatchesNewlines()) {
-            let message = plainText(String(row.1).replacing(/<br\s*\/?>/, with: "\n"))
-            if !details.warnings.contains(message) { details.warnings.append(message) }
-        }
-        return details
+    /// A task's runs, newest first.
+    static func runs(for id: String) -> [RunEntry] {
+        (records()[id] ?? []).reversed().compactMap { url in record(at: url).map { RunEntry(url: url, record: $0) } }
     }
 
-    /// e.g. "75 项 · 1.64 GB", or "无变化" when nothing was copied.
-    static func summary(_ details: Details) -> String? {
-        guard let count = details.processedCount else { return nil }
-        if count == 0 { return String(localized: "无变化") }
-        return [String(localized: "\(count) 项"), details.processedSize].compactMap { $0 }.joined(separator: " · ")
+    static func changes(for run: RunEntry) -> ChangeList? {
+        try? decoder.decode(ChangeList.self, from: Data(contentsOf: run.changesURL))
     }
 
-    private static func plainText(_ html: String) -> String {
-        html.replacing(/<[^>]+>/, with: " ")
-            .replacing("&quot;", with: "\"").replacing("&amp;", with: "&").replacing("&nbsp;", with: " ")
-            .replacing("&lt;", with: "<").replacing("&gt;", with: ">")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Removes a run's files.
+    static func remove(_ recordURL: URL) {
+        try? FileManager.default.removeItem(at: recordURL)
+        try? FileManager.default.removeItem(at: changesURL(for: recordURL))
     }
+
+    static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+
+    static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return e
+    }()
 }

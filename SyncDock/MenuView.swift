@@ -9,6 +9,12 @@ struct MenuView: View {
         NSApp.activate()
     }
 
+    private func openHistory(_ task: SyncTask?) {
+        if let task { store.historyTaskID = task.id }
+        openWindow(id: SyncDockApp.historyID)
+        NSApp.activate()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -31,7 +37,7 @@ struct MenuView: View {
             } else {
                 VStack(spacing: 2) {
                     ForEach(store.tasks) { task in
-                        TaskRow(task: task, store: store) {
+                        TaskRow(task: task, store: store, onHistory: { openHistory(task) }) {
                             store.beginEditing(task)
                             openEditor()
                         }
@@ -103,12 +109,7 @@ struct MenuView: View {
     }
 
     private var setupProblem: String {
-        if !store.freeFileSyncInstalled { return String(localized: "还没有安装 FreeFileSync，无法同步") }
-        switch store.permission {
-        case .checking: return String(localized: "正在检查 FreeFileSync 的权限…")
-        case .denied: return String(localized: "FreeFileSync 没有完全磁盘访问权限")
-        case .unknown, .granted: return String(localized: "还没确认 FreeFileSync 的权限")
-        }
+        String(localized: "SyncDock 还没有完全磁盘访问权限")
     }
 
     private var footer: some View {
@@ -118,8 +119,7 @@ struct MenuView: View {
                 .toggleStyle(.checkbox)
                 .font(.callout)
             Spacer()
-            Button("FreeFileSync") { store.openFreeFileSync() }
-            Button("日志") { store.openLogsFolder() }
+            Button("同步记录") { openHistory(nil) }
             Button("退出") { NSApp.terminate(nil) }
         }
         .buttonStyle(.borderless)
@@ -150,10 +150,11 @@ struct MenuView: View {
 private struct TaskRow: View {
     let task: SyncTask
     let store: SyncStore
+    let onHistory: () -> Void
     let onEdit: () -> Void
     @State private var hovering = false
 
-    private var log: SyncLog? { store.logs[task.name] }
+    private var log: SyncLog? { store.logs[task.id] }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -183,18 +184,8 @@ private struct TaskRow: View {
         .onHover { hovering = $0 }
     }
 
-    @ViewBuilder private var statusIcon: some View {
-        if store.isRunning(task) {
-            ProgressView().controlSize(.small)
-        } else if let log, !store.isStale(task) {
-            switch log.result {
-            case .success: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-            case .warning: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            case .error: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
-            }
-        } else {
-            Image(systemName: "clock.badge.exclamationmark.fill").foregroundStyle(.orange)
-        }
+    private var statusIcon: some View {
+        TaskStatusIcon(task: task, store: store)
     }
 
     @ViewBuilder private var lastRunLine: some View {
@@ -202,15 +193,13 @@ private struct TaskRow: View {
             Text("正在同步…").font(.caption).foregroundStyle(Color.accentColor)
         } else if let log {
             let parts = [String(localized: "上次 \(DateText.describe(log.date, now: store.now))"), resultText(log)]
-            Button {
-                store.openLog(task)
-            } label: {
+            Button(action: onHistory) {
                 Text(parts.compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(store.isStale(task) ? .orange : log.result == .success ? .secondary : resultColor(log))
             }
             .buttonStyle(.plain)
-            .help("打开这次同步的日志")
+            .help("查看同步记录")
         } else {
             Text("还没有同步记录").font(.caption).foregroundStyle(.orange)
         }
@@ -246,7 +235,7 @@ private struct TaskRow: View {
             } label: {
                 Image(systemName: "play.fill")
             }
-            .disabled(store.isRunning(task) || task.isVolumeMissing || !store.freeFileSyncInstalled)
+            .disabled(store.isRunning(task) || task.isVolumeMissing)
             .help(task.isVolumeMissing ? String(localized: "移动硬盘未连接") : String(localized: "立即同步"))
         }
         .buttonStyle(.borderless)

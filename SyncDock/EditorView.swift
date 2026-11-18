@@ -7,7 +7,7 @@ struct EditorView: View {
     @State private var confirmingDelete = false
 
     private var draft: TaskDraft { store.draft }
-    private var existingTask: SyncTask? { store.tasks.first { $0.label == draft.label } }
+    private var existingTask: SyncTask? { store.tasks.first { $0.id == draft.id } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,9 +28,6 @@ struct EditorView: View {
                     Picker("同步方式", selection: $store.draft.mode) {
                         Text("更新").tag(SyncMode.update)
                         Text("镜像").tag(SyncMode.mirror)
-                        if draft.mode == .custom || existingTask?.mode == .custom {
-                            Text("自定义").tag(SyncMode.custom)
-                        }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
@@ -115,9 +112,6 @@ struct EditorView: View {
             Label("让目标和源完全一致：源里删掉的文件，目标里也会删掉（移到废纸篓或云端回收站）。",
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.callout).foregroundStyle(.orange)
-        case .custom:
-            Text("这个任务用的是在 FreeFileSync 里设置的同步规则（比如双向同步），保存时不会改动。")
-                .font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -136,10 +130,6 @@ struct EditorView: View {
         HStack {
             if !draft.isNew {
                 Button("删除…", role: .destructive) { confirmingDelete = true }
-                Button("高级设置") {
-                    if let existingTask { store.edit(existingTask) }
-                }
-                .help("在 FreeFileSync 中打开这个任务的全部设置")
             }
             Spacer()
             if let message = saveError ?? store.validationError() {
@@ -160,9 +150,9 @@ struct EditorView: View {
 
     private func save(runAfter: Bool) {
         do {
-            let label = try store.saveDraft()
+            let task = try store.saveDraft()
             saveError = nil
-            if runAfter { store.runNow(label: label) }
+            if runAfter { store.runNow(id: task.id) }
             dismissWindow(id: SyncDockApp.editorID)
         } catch {
             saveError = String(localized: "保存失败：\(error.localizedDescription)")
@@ -172,8 +162,8 @@ struct EditorView: View {
 
 private extension TaskDraft {
     var requiresVolumeMissing: Bool {
-        let volume = LaunchAgent.requiredVolume(source: source, target: target)
-        return !volume.isEmpty && !FileManager.default.fileExists(atPath: volume)
+        guard let volume = SyncTask.requiredVolume(source: source, target: effectiveTarget) else { return false }
+        return !FileManager.default.fileExists(atPath: volume)
     }
 }
 
