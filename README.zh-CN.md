@@ -60,7 +60,7 @@ macOS 15 或更高版本 · Apple 芯片和 Intel 均可 · 已通过 Apple 公�
 
 ### 从 SyncDock 1.x 升级
 
-1.x 版本用 FreeFileSync 执行同步。第一次打开 2.0 时，原有任务会自动迁移到内置引擎，名称、文件夹、同步方式、过滤和定时都保持不变。记得给 SyncDock 授予「完全磁盘访问权限」（见上文），迁移后的任务才能运行。`~/FreeFileSync` 里的 `.ffs_batch` 文件会原样保留；如果不再用 FreeFileSync，可以把它卸载。
+1.x 版本用 FreeFileSync 执行同步。给 2.0 授予「完全磁盘访问权限」（见上文）后，原有任务会自动迁移到内置引擎，名称、文件夹、同步方式、过滤和定时都保持不变。在授权之前，这些任务仍由 FreeFileSync 照常运行，不会漏掉备份。`~/FreeFileSync` 里的 `.ffs_batch` 文件会原样保留；如果不再用 FreeFileSync，可以把它卸载。
 
 用了 SyncDock 不支持的设置的任务（双向同步、按大小或日期过滤、额外的过滤规则）不会迁移，仍由 FreeFileSync 照常运行，SyncDock 里不再显示它们。
 

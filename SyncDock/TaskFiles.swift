@@ -44,14 +44,18 @@ enum RunLock {
     }
 
     /// Takes the lock, returning its file descriptor, or nil when the task is already running.
+    /// The app's `isHeld` check holds the lock for an instant, so a busy lock is retried briefly
+    /// before concluding another run has it.
     static func acquire(id: String) -> Int32? {
+        try? FileManager.default.createDirectory(at: Paths.tasks, withIntermediateDirectories: true)
         let fd = open(url(for: id).path(percentEncoded: false), O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
         guard fd >= 0 else { return nil }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-            close(fd)
-            return nil
+        for _ in 0..<20 {
+            if flock(fd, LOCK_EX | LOCK_NB) == 0 { return fd }
+            usleep(100_000)
         }
-        return fd
+        close(fd)
+        return nil
     }
 
     static func isHeld(id: String) -> Bool {

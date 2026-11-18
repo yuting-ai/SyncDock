@@ -34,15 +34,15 @@ final class SyncStore {
 
     /// Set for layout snapshots, so they don't depend on the permissions of whoever renders them.
     private var accessOverride: Bool?
+    /// Whether this store manages the real tasks (not a snapshot or SYNCDOCK_HOME test data).
+    private let managesAgents: Bool
+    private var migrationChecked = false
     private var timer: Timer?
     private var watcher: DispatchSourceFileSystemObject?
 
     init(watch: Bool = true) {
-        if watch && !Paths.isTestHome {
-            // Tasks from SyncDock 1.x (run by FreeFileSync) move over to the built-in engine.
-            LegacyImport.run()
-            TaskFiles.repairAgents(TaskLoader.loadTasks())
-        }
+        managesAgents = watch && !Paths.isTestHome
+        if managesAgents { TaskFiles.repairAgents(TaskLoader.loadTasks()) }
         refresh()
         if watch { startWatching() }
     }
@@ -106,6 +106,15 @@ final class SyncStore {
 
     func checkSetup() {
         hasFullDiskAccess = accessOverride ?? FullDiskAccess.isGranted
+        migrateIfReady()
+    }
+
+    /// Moves SyncDock 1.x tasks (run by FreeFileSync) to the built-in engine, once SyncDock has the
+    /// access to run them. Until then FreeFileSync keeps running them, so no backup is missed.
+    private func migrateIfReady() {
+        guard managesAgents, hasFullDiskAccess, !migrationChecked else { return }
+        migrationChecked = true
+        if !LegacyImport.run().isEmpty { tasks = TaskLoader.loadTasks(now: now) }
     }
 
     /// Forces a setup state for layout snapshots.

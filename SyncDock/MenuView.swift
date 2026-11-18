@@ -165,11 +165,15 @@ private struct TaskRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.name)
                     .font(.system(.body, weight: .semibold))
-                Text("\(task.source)  →  \(task.target)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // Each side shortens on its own so the arrow stays visible with long paths.
+                HStack(spacing: 6) {
+                    Text(verbatim: task.source).truncationMode(.middle)
+                    Text(verbatim: "→").layoutPriority(1)
+                    Text(verbatim: task.target).truncationMode(.middle)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
                 lastRunLine
                 nextRunLine
             }

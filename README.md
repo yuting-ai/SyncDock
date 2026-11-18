@@ -60,7 +60,7 @@ All versions and release notes: [Releases](https://github.com/yuting-ai/SyncDock
 
 ### Upgrading from SyncDock 1.x
 
-Versions 1.x ran syncs with FreeFileSync. The first time you open 2.0, your tasks move over to the built-in engine automatically, keeping their names, folders, sync method, filters and schedules. Grant SyncDock Full Disk Access (see above) so the moved tasks can run. The `.ffs_batch` files in `~/FreeFileSync` are left in place, and you can uninstall FreeFileSync if you don't use it otherwise.
+Versions 1.x ran syncs with FreeFileSync. Once 2.0 has Full Disk Access (see above), your tasks move over to the built-in engine automatically, keeping their names, folders, sync method, filters and schedules. Until then FreeFileSync keeps running them, so no backup is missed. The `.ffs_batch` files in `~/FreeFileSync` are left in place, and you can uninstall FreeFileSync if you don't use it otherwise.
 
 Tasks with settings SyncDock doesn't offer (two-way sync, size or date filters, extra filter rules) are not moved: they keep running in FreeFileSync as before, and SyncDock doesn't show them.
 
