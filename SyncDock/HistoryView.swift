@@ -202,6 +202,10 @@ private struct TaskHeader: View {
                     Tag(text: task.mode == .mirror ? String(localized: "镜像") : String(localized: "更新"),
                         systemImage: task.mode == .mirror ? "equal.square" : "arrow.right.square")
                     Tag(text: ScheduleText.describe(task.schedule), systemImage: "calendar")
+                    if task.isVolumeMissing {
+                        Tag(text: String(localized: "\(task.requiredVolume.map { URL(filePath: $0).lastPathComponent } ?? String(localized: "移动硬盘")) 未连接"),
+                            systemImage: "externaldrive.badge.xmark", tint: .orange)
+                    }
                 }
             }
             Spacer(minLength: 12)
@@ -246,14 +250,15 @@ private struct PathLabel: View {
 private struct Tag: View {
     let text: String
     let systemImage: String
+    var tint: Color? = nil
 
     var body: some View {
         Label(text, systemImage: systemImage)
             .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule().fill(Color.primary.opacity(0.06)))
+            .background(Capsule().fill((tint ?? .primary).opacity(tint == nil ? 0.06 : 0.12)))
     }
 }
 

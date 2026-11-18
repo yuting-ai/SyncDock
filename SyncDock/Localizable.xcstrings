@@ -17,6 +17,16 @@
     "%@ → %@": {
       "shouldTranslate": false
     },
+    "%@ 未连接": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ not connected"
+          }
+        }
+      }
+    },
     "%@ 未连接，到时会跳过": {
       "localizations": {
         "en": {
