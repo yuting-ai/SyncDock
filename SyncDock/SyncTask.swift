@@ -85,6 +85,8 @@ struct SyncTask: Identifiable, Equatable, Codable {
     var mode: SyncMode
     var excludeHidden: Bool
     var includeGit: Bool
+    /// Folders, files and name patterns left out of the sync; see `ExcludeRules`.
+    var excludes: [String] = []
     var schedule: Schedule
 
     static func newID() -> String {
@@ -123,7 +125,8 @@ struct SyncTask: Identifiable, Equatable, Codable {
 
     var draft: TaskDraft {
         TaskDraft(id: id, name: name, source: sourcePath, target: targetFolder, createSubfolder: createSubfolder,
-                  mode: mode, excludeHidden: excludeHidden, includeGit: includeGit, schedule: schedule)
+                  mode: mode, excludeHidden: excludeHidden, includeGit: includeGit, excludes: excludes,
+                  schedule: schedule)
     }
 
     static func effectiveTarget(source: String, target: String, createSubfolder: Bool) -> String {
@@ -141,6 +144,27 @@ struct SyncTask: Identifiable, Equatable, Codable {
     }
 }
 
+extension SyncTask {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, sourcePath, targetFolder, createSubfolder, mode, excludeHidden, includeGit, excludes, schedule
+    }
+
+    /// Task files written before exclusions existed have no `excludes`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        sourcePath = try c.decode(String.self, forKey: .sourcePath)
+        targetFolder = try c.decode(String.self, forKey: .targetFolder)
+        createSubfolder = try c.decode(Bool.self, forKey: .createSubfolder)
+        mode = try c.decode(SyncMode.self, forKey: .mode)
+        excludeHidden = try c.decode(Bool.self, forKey: .excludeHidden)
+        includeGit = try c.decode(Bool.self, forKey: .includeGit)
+        excludes = try c.decodeIfPresent([String].self, forKey: .excludes) ?? []
+        schedule = try c.decode(Schedule.self, forKey: .schedule)
+    }
+}
+
 /// The editable fields of a task, as shown in the editor.
 struct TaskDraft: Equatable {
     /// nil for a task that does not exist yet.
@@ -153,6 +177,7 @@ struct TaskDraft: Equatable {
     var mode: SyncMode = .update
     var excludeHidden = true
     var includeGit = false
+    var excludes: [String] = []
     var schedule = Schedule()
 
     var isNew: Bool { id == nil }
@@ -168,7 +193,7 @@ struct TaskDraft: Equatable {
     func task(id: String) -> SyncTask {
         SyncTask(id: id, name: trimmedName, sourcePath: source, targetFolder: target,
                  createSubfolder: createSubfolder, mode: mode, excludeHidden: excludeHidden,
-                 includeGit: includeGit, schedule: schedule)
+                 includeGit: includeGit, excludes: excludes, schedule: schedule)
     }
 
     /// A message describing what still needs fixing, or nil when the draft can be saved.

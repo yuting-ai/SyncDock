@@ -2,9 +2,8 @@ import SwiftUI
 
 /// Started from `Main` unless the process is a background sync run.
 struct SyncDockApp: App {
-    static let editorID = "editor"
+    static let mainID = "main"
     static let setupID = "setup"
-    static let historyID = "history"
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = SyncStore(watch: !Main.isSnapshot)
@@ -17,6 +16,15 @@ struct SyncDockApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        Window("SyncDock", id: Self.mainID) {
+            MainView(store: store)
+        }
+        .defaultSize(width: 980, height: 700)
+        .defaultPosition(.center)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+        .commands { AppCommands(store: store) }
+
         Window("设置 SyncDock", id: Self.setupID) {
             SetupView(store: store)
         }
@@ -25,21 +33,55 @@ struct SyncDockApp: App {
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
 
-        Window("同步记录", id: Self.historyID) {
-            HistoryView(store: store)
+        Settings {
+            SettingsView(store: store)
         }
-        .defaultSize(width: 940, height: 660)
-        .defaultPosition(.center)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
+    }
+}
 
-        Window("同步任务", id: Self.editorID) {
-            EditorView(store: store)
+/// The menu bar menus, shown while a SyncDock window is open (see `AppDelegate`).
+private struct AppCommands: Commands {
+    let store: SyncStore
+    @Environment(\.openWindow) private var openWindow
+
+    private func showMain() {
+        openWindow(id: SyncDockApp.mainID)
+        NSApp.activate()
+    }
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("新建任务…") {
+                showMain()
+                store.beginNewTask()
+            }
+            .keyboardShortcut("n")
+            .disabled(store.isEditing)
         }
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
+        CommandMenu("任务") {
+            Button("立即同步") {
+                if let task = store.selectedTask { store.runNow(task) }
+            }
+            .keyboardShortcut("r")
+            .disabled(store.selectedTask.map { store.isRunning($0) || $0.isVolumeMissing } ?? true)
+            Button("全部同步") { store.runAll() }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(store.tasks.isEmpty)
+            Divider()
+            Button("编辑…") {
+                if let task = store.selectedTask {
+                    showMain()
+                    store.beginEditing(task)
+                }
+            }
+            .keyboardShortcut("e")
+            .disabled(store.selectedTask == nil || store.isEditing)
+        }
+        CommandGroup(before: .windowList) {
+            Button("SyncDock 主窗口") { showMain() }
+                .keyboardShortcut("0")
+            Divider()
+        }
     }
 }
 
@@ -50,6 +92,10 @@ private struct MenuBarLabel: View {
 
     var body: some View {
         Image(systemName: store.overall.symbol)
+            .onReceive(NotificationCenter.default.publisher(for: AppDelegate.showMainWindow)) { _ in
+                openWindow(id: SyncDockApp.mainID)
+                NSApp.activate()
+            }
             .task {
                 store.checkSetup()
                 if !store.setupComplete {
@@ -61,7 +107,27 @@ private struct MenuBarLabel: View {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Posted to open the main window from outside SwiftUI.
+    static let showMainWindow = Notification.Name("SyncDockShowMainWindow")
+
+    /// Opening SyncDock again (Finder, Launchpad, Dock) while it runs shows the main window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { NotificationCenter.default.post(name: Self.showMainWindow, object: nil) }
+        return true
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A menu bar app, but while one of its windows is open it acts like a normal app: Dock icon,
+        // menus, ⌘Q. Closing the last window puts it back in the menu bar only.
+        let center = NotificationCenter.default
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification,
+                     NSWindow.didMiniaturizeNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { note in
+                let closing = name == NSWindow.willCloseNotification ? note.object as? NSWindow : nil
+                MainActor.assumeIsolated { Self.updateActivationPolicy(ignoring: closing) }
+            }
+        }
+
         // `SyncDock --snapshot out.png [task-id|new|setup|history[:task-id]]` renders the
         // panel, the editor or the setup window to a file and quits; used for checking the layout.
         let args = CommandLine.arguments
@@ -76,6 +142,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+extension AppDelegate {
+    @MainActor
+    static func updateActivationPolicy(ignoring closing: NSWindow? = nil) {
+        // The menu bar panel, alerts and open panels are NSPanels; they don't count as app windows.
+        let hasWindow = NSApp.windows.contains {
+            $0 !== closing && !($0 is NSPanel) && $0.styleMask.contains(.titled) && ($0.isVisible || $0.isMiniaturized)
+        }
+        let policy: NSApplication.ActivationPolicy = hasWindow ? .regular : .accessory
+        guard NSApp.activationPolicy() != policy else { return }
+        NSApp.setActivationPolicy(policy)
+        if hasWindow { NSApp.activate() }
+    }
+}
+
 @MainActor
 enum Snapshot {
     static func render(to url: URL, editing: String?) {
@@ -86,15 +166,16 @@ enum Snapshot {
         if let editing, editing.hasPrefix("setup") {
             root = AnyView(SetupView(store: store))
         } else if let editing, editing.hasPrefix("history") {
-            store.historyTaskID = editing.split(separator: ":").dropFirst().first.map(String.init)
-            root = AnyView(HistoryView(store: store, preload: true).frame(width: 940, height: 660))
+            store.selectedTaskID = editing.split(separator: ":").dropFirst().first.map(String.init)
+            root = AnyView(MainView(store: store, preload: true).frame(width: 980, height: 700))
         } else if let editing {
             if let task = store.tasks.first(where: { $0.id == editing }) {
                 store.beginEditing(task)
             } else {
                 store.beginNewTask()
             }
-            root = AnyView(EditorView(store: store))
+            // Tall enough to show the whole form instead of its scrolled first screen.
+            root = AnyView(EditorView(store: store, fixedHeight: 965))
         } else {
             root = AnyView(MenuView(store: store))
         }

@@ -28,7 +28,8 @@ enum SyncRunner {
         let start = Date.now
         let options = SyncEngine.Options(source: URL(filePath: task.sourcePath), target: URL(filePath: task.targetPath),
                                          mode: task.mode, excludeHidden: task.excludeHidden,
-                                         includeGit: task.includeGit, deletePermanently: task.deletesPermanently)
+                                         includeGit: task.includeGit, excludes: task.excludes,
+                                         deletePermanently: task.deletesPermanently)
         let outcome = SyncEngine(options: options, cancelled: cancellation).run()
         var counts: [String: Int] = [:]
         for change in outcome.changes { counts[change.kind.rawValue, default: 0] += 1 }

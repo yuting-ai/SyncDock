@@ -16,6 +16,7 @@ final class SyncEngine {
         var mode: SyncMode
         var excludeHidden: Bool
         var includeGit: Bool
+        var excludes: [String] = []
         /// Delete for good instead of moving to the Trash (cloud folders have no Trash to move to).
         var deletePermanently: Bool
     }
@@ -36,12 +37,14 @@ final class SyncEngine {
     static let tempPrefix = ".syncdock-tmp-"
 
     private let options: Options
+    private let rules: ExcludeRules
     private let cancelled: Cancellation
     private var outcome = Outcome(result: .success)
     private var caseInsensitive = true
 
     init(options: Options, cancelled: Cancellation = Cancellation()) {
         self.options = options
+        self.rules = ExcludeRules(options.excludes)
         self.cancelled = cancelled
     }
 
@@ -222,7 +225,8 @@ final class SyncEngine {
                 continue  // sockets, pipes, devices
             }
             guard Filter.includes(name: name, isFolder: kind == .folder, insideGit: insideGit,
-                                  excludeHidden: options.excludeHidden, includeGit: options.includeGit)
+                                  excludeHidden: options.excludeHidden, includeGit: options.includeGit),
+                  !rules.excludes(relativePath: join(relative, name), name: name)
             else { continue }
             entries.append(Entry(name: name, kind: kind, size: Int64(values.fileSize ?? 0),
                                  modified: values.contentModificationDate ?? .distantPast))
@@ -356,4 +360,46 @@ final class Cancellation: Sendable {
     private let flag = Atomic<Bool>(false)
     var isSet: Bool { flag.load(ordering: .relaxed) }
     func set() { flag.store(true, ordering: .relaxed) }
+}
+
+/// The user's exclusions. A rule containing "/" is a path inside the source ("Project/build"); any
+/// other rule is a name, with * and ? wildcards, matched at every level ("node_modules", "*.log").
+/// Letter case and Unicode normalization don't matter.
+struct ExcludeRules {
+    private var paths = Set<String>()
+    private var patterns: [String] = []
+
+    init(_ rules: [String]) {
+        for rule in rules {
+            switch Self.parse(rule) {
+            case .path(let path): paths.insert(Self.normalize(path))
+            case .name(let pattern): patterns.append(Self.normalize(pattern))
+            case nil: break
+            }
+        }
+    }
+
+    enum Rule: Equatable {
+        case path(String)
+        case name(String)
+    }
+
+    static func parse(_ rule: String) -> Rule? {
+        let trimmed = rule.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        guard trimmed.contains("/") else { return .name(trimmed) }
+        let path = trimmed.split(separator: "/").joined(separator: "/")
+        return path.isEmpty ? nil : .path(path)
+    }
+
+    func excludes(relativePath: String, name: String) -> Bool {
+        if !paths.isEmpty && paths.contains(Self.normalize(relativePath)) { return true }
+        guard !patterns.isEmpty else { return false }
+        let name = Self.normalize(name)
+        return patterns.contains { fnmatch($0, name, 0) == 0 }
+    }
+
+    private static func normalize(_ s: String) -> String {
+        s.precomposedStringWithCanonicalMapping.lowercased()
+    }
 }

@@ -18,7 +18,7 @@ All versions and release notes: [Releases](https://github.com/yuting-ai/SyncDock
 
 ## Screenshots
 
-<p align="center"><img src="docs/images/history-en.png" width="760" alt="Sync history window: tasks on the left, the last runs as colored bars, the selected run's result, counts and list of changed files"></p>
+<p align="center"><img src="docs/images/main-en.png" width="760" alt="Main window: tasks on the left; the selected task with its last runs as colored bars, the run's result, counts and list of changed files"></p>
 
 <table>
   <tr>
@@ -26,7 +26,7 @@ All versions and release notes: [Releases](https://github.com/yuting-ai/SyncDock
     <th>First-run setup</th>
   </tr>
   <tr>
-    <td valign="top"><img src="docs/images/editor-en.png" width="380" alt="Task editor with source and destination folders, sync method, filters and a weekly schedule"></td>
+    <td valign="top"><img src="docs/images/editor-en.png" width="380" alt="Task editor with source and destination folders, sync method, filters, excluded folders and a weekly schedule"></td>
     <td valign="top"><img src="docs/images/setup-en.png" width="420" alt="First-run setup asking for Full Disk Access"></td>
   </tr>
 </table>
@@ -34,12 +34,13 @@ All versions and release notes: [Releases](https://github.com/yuting-ai/SyncDock
 ## Features
 
 - **Status in the menu bar**: each task's last result (how many items, how much data) and its next scheduled run.
-- **Sync history**: a window with each task's last 30 runs: result, duration, what was added, updated and deleted, any errors, and a searchable list of every changed file.
+- **Main window**: all tasks in one place. Create, edit, sync and delete them, and see each task's last 30 runs: result, duration, what was added, updated and deleted, any errors, and a searchable list of every changed file.
 - **Create and edit tasks**: choose a source and a destination folder. By default SyncDock creates a folder named after the source inside the destination, and shows exactly where files will go.
 - **Two sync methods**
   - **Update**: copies new and changed files to the destination and never deletes anything there (default).
   - **Mirror**: makes the destination identical to the source; files deleted from the source are also deleted from the destination (moved to the Trash).
 - **Filters**: exclude hidden files, optionally keeping `.git` folders (handy for backing up code).
+- **Exclusions**: leave out chosen folders or files (say, a build folder), or anything with a given name at any level, such as `node_modules` or `*.log`. Excluded items are never deleted from the destination either.
 - **Schedules**: manual, daily, or on chosen weekdays. Runs in the background with **no app needing to stay open**.
 - **Sync Now**: run any task once, whenever you like.
 - **External drive aware**: if the drive isn't connected, the sync is skipped with a notification, so nothing is written to your internal disk by mistake.
@@ -53,7 +54,7 @@ All versions and release notes: [Releases](https://github.com/yuting-ai/SyncDock
 ## Installation
 
 1. [Download SyncDock.dmg](https://github.com/yuting-ai/SyncDock/releases/latest/download/SyncDock.dmg), open it, and drag SyncDock into the Applications folder.
-2. Open SyncDock. It has no window and no Dock icon; it appears in the **menu bar** at the top right of the screen.
+2. Open SyncDock. It lives in the **menu bar** at the top right of the screen; while its main window is open it also shows in the Dock.
 3. The first time, a “Welcome to SyncDock” window asks you to **allow SyncDock to access all files**: click “Open System Settings”, click ＋ below the Full Disk Access list, choose SyncDock and turn on its switch. SyncDock checks again when you come back.
 
 > **Why Full Disk Access?** Scheduled syncs run in the background, where nobody can click “Allow”. Granting access in advance lets SyncDock read your Desktop, Documents and external drives.
@@ -66,15 +67,16 @@ Tasks with settings SyncDock doesn't offer (two-way sync, size or date filters, 
 
 ## Usage
 
-Click SyncDock in the menu bar to open the panel:
+Click SyncDock in the menu bar for a quick look at every task, or open the main window with “Open SyncDock” at the bottom of the panel (or by opening SyncDock again from Applications).
 
-| To | Use |
-|---|---|
-| Create a task | ＋ at the top right of the panel |
-| Edit or delete a task | ⚙ next to the task |
-| Sync a task now | ▶ next to the task |
-| See what a sync did | Click the “Last: …” line under the task, or “Sync History” at the bottom of the panel |
-| Start SyncDock when you log in | “Open at Login” at the bottom of the panel |
+| To | In the main window | In the menu bar panel |
+|---|---|---|
+| Create a task | ＋ in the toolbar, “New Task” below the list, or ⌘N | ＋ at the top right |
+| Edit a task | “Edit” or ⌘E | ⚙ next to the task |
+| Sync a task now | “Sync Now” or ⌘R; ⇧⌘R syncs all tasks | ▶ next to the task |
+| Delete a task | ⋯ next to “Edit”, or right-click the task | |
+| See what a sync did | Pick a run in the bar above the details | Click the “Last: …” line under the task |
+| Start SyncDock when you log in | SyncDock ▸ Settings… | “Open at Login” at the bottom |
 
 ### What happens when I delete a task?
 
@@ -121,13 +123,13 @@ SyncDock (menu bar app)
  ├─ Schedules  ~/Library/LaunchAgents/me.lepton.syncdock.<id>.plist    macOS launchd
  └─ History    ~/Library/Application Support/SyncDock/Logs/<id> <time>.json / .changes.json
 
-When a task is due: launchd → SyncDock --run <id> (no window) → checks the external drive is connected → syncs → records the run → the menu bar and history window show it
+When a task is due: launchd → SyncDock --run <id> (no window) → checks the external drive is connected → syncs → records the run → the menu bar and main window show it
 ```
 
 - Each task is one JSON file plus one launchd schedule. The schedule starts SyncDock's own executable with `--run`, which syncs without any interface and exits, so the menu bar app doesn't need to be open.
 - Because the background runs are the same app, the Full Disk Access you grant SyncDock covers them. SyncDock checks it by listing a folder only Full Disk Access can read.
 - A lock file keeps a task from running twice at once; the menu bar uses it to show syncs in progress, however they were started.
-- Every run writes a small `.json` summary (result, counts, errors) that the menu bar reads, and a `.changes.json` list of changed files (up to 5,000) that the history window loads when you open that run. The last 30 runs per task are kept.
+- Every run writes a small `.json` summary (result, counts, errors) that the menu bar reads, and a `.changes.json` list of changed files (up to 5,000) that the main window loads when you open that run. The last 30 runs per task are kept.
 
 ## Development
 
@@ -142,11 +144,12 @@ Quit the installed SyncDock first, or you'll get two icons in the menu bar.
 | File | Contents |
 |---|---|
 | `SyncDock/Main.swift` | Entry point: background sync run or menu bar app |
-| `SyncDock/SyncDockApp.swift` | Menu bar icon, windows |
+| `SyncDock/SyncDockApp.swift` | Menu bar icon, windows, menus |
 | `SyncDock/MenuView.swift` | Menu bar panel |
-| `SyncDock/EditorView.swift` | New / edit task window |
+| `SyncDock/EditorView.swift` | New / edit task sheet |
 | `SyncDock/SetupView.swift` | First-run setup |
-| `SyncDock/HistoryView.swift` | Sync history window |
+| `SyncDock/MainView.swift` | Main window: tasks, run history, changed files |
+| `SyncDock/SettingsView.swift` | Settings window |
 | `SyncDock/SyncStore.swift` | State, Sync Now, saving and deleting tasks |
 | `SyncDock/SyncTask.swift` | Task model, reading tasks and run history |
 | `SyncDock/TaskFiles.swift` | Saving tasks, launchd schedules, run lock |
@@ -161,10 +164,10 @@ You can check the interface without opening the menu bar by rendering it to an i
 
 ```bash
 SyncDock.app/Contents/MacOS/SyncDock --snapshot out.png                 # menu bar panel
-SyncDock.app/Contents/MacOS/SyncDock --snapshot out.png new             # new task window
+SyncDock.app/Contents/MacOS/SyncDock --snapshot out.png new             # new task sheet
 SyncDock.app/Contents/MacOS/SyncDock --snapshot out.png <task id>       # editing a task
 SyncDock.app/Contents/MacOS/SyncDock --snapshot out.png setup           # setup window
-SyncDock.app/Contents/MacOS/SyncDock --snapshot out.png history:<id>    # sync history of a task
+SyncDock.app/Contents/MacOS/SyncDock --snapshot out.png history:<id>    # main window showing a task
 ```
 
 Set the environment variable `SYNCDOCK_HOME=<folder>` to use a different folder for tasks and run history (`<folder>/Tasks`, `<folder>/Logs`), for previewing states with demo data or testing syncs. With it set, SyncDock never touches launch agents, so your real schedules are safe. To run one sync by hand: `SYNCDOCK_HOME=<folder> SyncDock.app/Contents/MacOS/SyncDock --run <task id>`.

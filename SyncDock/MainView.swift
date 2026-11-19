@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// The sync history window: tasks on the left; the selected task's recent runs and what each one did on the right.
-struct HistoryView: View {
+/// The main window: tasks on the left; the selected task, its recent runs and what each run did on the right.
+/// New and edited tasks open in a sheet over it.
+struct MainView: View {
     @Bindable var store: SyncStore
-    @Environment(\.openWindow) private var openWindow
     @State private var runs: [RunEntry] = []
     @State private var selectedRunID: URL?
     @State private var loaded: LoadedChanges?
+    @State private var deleting: SyncTask?
 
     struct LoadedChanges {
         let url: URL
@@ -16,7 +17,7 @@ struct HistoryView: View {
     /// `preload` reads the history right away instead of in a task, for layout snapshots.
     init(store: SyncStore, preload: Bool = false) {
         _store = Bindable(wrappedValue: store)
-        if preload, let id = store.historyTaskID ?? store.tasks.first?.id {
+        if preload, let id = store.selectedTask?.id {
             let runs = LogReader.runs(for: id)
             _runs = State(initialValue: runs)
             _selectedRunID = State(initialValue: runs.first?.url)
@@ -24,9 +25,7 @@ struct HistoryView: View {
         }
     }
 
-    private var task: SyncTask? {
-        store.tasks.first { $0.id == store.historyTaskID } ?? store.tasks.first
-    }
+    private var task: SyncTask? { store.selectedTask }
 
     private var selectedRun: RunEntry? {
         runs.first { $0.url == selectedRunID }
@@ -35,21 +34,41 @@ struct HistoryView: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-                .frame(width: 230)
+                .frame(width: 240)
             Divider()
             Group {
                 if let task {
                     detail(task)
                 } else {
-                    ContentUnavailableView("还没有同步任务", systemImage: "externaldrive.badge.plus",
-                                           description: Text("在菜单栏里点 ＋ 新建一个同步任务。"))
+                    emptyState
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))
         }
-        .frame(minWidth: 860, minHeight: 560)
-        .navigationTitle("同步记录")
+        .frame(minWidth: 900, minHeight: 600)
+        .navigationTitle("SyncDock")
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    store.runAll()
+                } label: {
+                    Label("全部同步", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .help("立即同步所有任务")
+                .disabled(store.tasks.isEmpty)
+                Button {
+                    store.beginNewTask()
+                } label: {
+                    Label("新建任务", systemImage: "plus")
+                }
+                .help("新建同步任务")
+            }
+        }
+        .sheet(isPresented: $store.isEditing) {
+            EditorView(store: store)
+        }
+        .confirmDelete($deleting, store: store)
         .task(id: ReloadKey(taskID: task?.id, latest: task.flatMap { store.logs[$0.id]?.date })) {
             await reloadRuns()
         }
@@ -63,24 +82,54 @@ struct HistoryView: View {
         let latest: Date?
     }
 
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("还没有同步任务", systemImage: "externaldrive.badge.plus")
+        } description: {
+            Text("新建一个任务，把文件夹按计划同步到移动硬盘、云盘或其他文件夹。")
+        } actions: {
+            Button("新建任务") { store.beginNewTask() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+        }
+    }
+
     // MARK: Sidebar
 
     private var sidebar: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("任务")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 4)
-                ForEach(store.tasks) { item in
-                    SidebarRow(task: item, store: store, selected: item.id == task?.id) {
-                        store.historyTaskID = item.id
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("任务")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 4)
+                    ForEach(store.tasks) { item in
+                        SidebarRow(task: item, store: store, selected: item.id == task?.id) {
+                            store.selectedTaskID = item.id
+                        }
+                        .contextMenu {
+                            TaskActions(task: item, store: store) { deleting = item }
+                        }
                     }
                 }
+                .padding(10)
+                .padding(.top, 6)
             }
-            .padding(10)
-            .padding(.top, 6)
+            Divider()
+            HStack {
+                Button {
+                    store.beginNewTask()
+                } label: {
+                    Label("新建任务", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .help("新建同步任务")
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
         .background(Color(nsColor: .underPageBackgroundColor).opacity(0.5))
     }
@@ -89,14 +138,10 @@ struct HistoryView: View {
 
     private func detail(_ task: SyncTask) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            TaskHeader(task: task, store: store) {
-                store.beginEditing(task)
-                openWindow(id: SyncDockApp.editorID)
-                NSApp.activate()
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
+            TaskHeader(task: task, store: store) { deleting = task }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 14)
 
             if !runs.isEmpty || store.isRunning(task) {
                 RunTimeline(runs: runs, selection: $selectedRunID, isRunning: store.isRunning(task), now: store.now)
@@ -109,9 +154,16 @@ struct HistoryView: View {
             if let run = selectedRun {
                 RunDetail(run: run, changes: loaded?.url == run.url ? .some(loaded?.list) : nil, now: store.now)
             } else {
-                ContentUnavailableView("还没有同步记录", systemImage: "clock.arrow.circlepath",
-                                       description: Text("任务运行后，每次同步的结果都会显示在这里。"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView {
+                    Label("还没有同步记录", systemImage: "clock.arrow.circlepath")
+                } description: {
+                    Text("任务运行后，每次同步的结果都会显示在这里。")
+                } actions: {
+                    if !store.isRunning(task) && !task.isVolumeMissing {
+                        Button("立即同步") { store.runNow(task) }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -137,6 +189,46 @@ struct HistoryView: View {
         if selectedRunID == run.url { loaded = LoadedChanges(url: run.url, list: list) }
     }
 }
+
+// MARK: - Task actions
+
+/// The commands for one task, shared by the sidebar's context menu and the header's ⋯ menu.
+private struct TaskActions: View {
+    let task: SyncTask
+    let store: SyncStore
+    var includeMain = true
+    let onDelete: () -> Void
+
+    var body: some View {
+        if includeMain {
+            Button("立即同步") { store.runNow(task) }
+                .disabled(store.isRunning(task) || task.isVolumeMissing)
+            Button("编辑…") { store.beginEditing(task) }
+            Divider()
+        }
+        Button("在 Finder 中打开源文件夹") { NSWorkspace.shared.open(URL(filePath: task.sourcePath)) }
+        Button("在 Finder 中打开目标文件夹") { NSWorkspace.shared.open(URL(filePath: task.targetPath)) }
+            .disabled(!FileManager.default.fileExists(atPath: task.targetPath))
+        Divider()
+        Button("删除任务…", role: .destructive, action: onDelete)
+    }
+}
+
+private extension View {
+    /// Asks before deleting the task in `item`.
+    func confirmDelete(_ item: Binding<SyncTask?>, store: SyncStore) -> some View {
+        confirmationDialog(String(localized: "删除任务「\(item.wrappedValue?.name ?? "")」？"),
+                           isPresented: Binding(get: { item.wrappedValue != nil },
+                                                set: { if !$0 { item.wrappedValue = nil } }),
+                           presenting: item.wrappedValue) { task in
+            Button("删除任务", role: .destructive) { store.delete(task) }
+        } message: { _ in
+            Text("只删除这个同步任务和它的定时设置（会移到废纸篓），已经同步过去的文件不受影响。")
+        }
+    }
+}
+
+// MARK: - Sidebar row
 
 private struct SidebarRow: View {
     let task: SyncTask
@@ -175,6 +267,8 @@ private struct SidebarRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The row's own highlight already shows the selection.
+        .focusEffectDisabled()
         .onHover { hovering = $0 }
     }
 }
@@ -184,7 +278,7 @@ private struct SidebarRow: View {
 private struct TaskHeader: View {
     let task: SyncTask
     let store: SyncStore
-    let onEdit: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -202,6 +296,11 @@ private struct TaskHeader: View {
                     Tag(text: task.mode == .mirror ? String(localized: "镜像") : String(localized: "更新"),
                         systemImage: task.mode == .mirror ? "equal.square" : "arrow.right.square")
                     Tag(text: ScheduleText.describe(task.schedule), systemImage: "calendar")
+                    if !task.excludes.isEmpty {
+                        Tag(text: String(localized: "排除 \(task.excludes.count) 项"),
+                            systemImage: "line.3.horizontal.decrease.circle")
+                            .help(task.excludes.joined(separator: "\n"))
+                    }
                     if task.isVolumeMissing {
                         Tag(text: String(localized: "\(task.requiredVolume.map { URL(filePath: $0).lastPathComponent } ?? String(localized: "移动硬盘")) 未连接"),
                             systemImage: "externaldrive.badge.xmark", tint: .orange)
@@ -210,7 +309,17 @@ private struct TaskHeader: View {
             }
             Spacer(minLength: 12)
             HStack(spacing: 8) {
-                Button(action: onEdit) {
+                Menu {
+                    TaskActions(task: task, store: store, includeMain: false, onDelete: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("更多操作")
+                Button {
+                    store.beginEditing(task)
+                } label: {
                     Label("编辑", systemImage: "slider.horizontal.3")
                 }
                 Button {
@@ -460,24 +569,45 @@ private struct RunDetail: View {
 
     // MARK: Changes
 
+    /// One row when there's room; the title above the filter and search when the window is narrow.
     private var changesHeader: some View {
-        HStack(spacing: 12) {
-            Text("变动明细")
-                .font(.headline)
-            Spacer()
-            Picker("显示", selection: $filter) {
-                ForEach(ChangeFilter.allCases) { filter in
-                    Text(filter.title(count: count(filter))).tag(filter)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                changesTitle
+                Spacer(minLength: 12)
+                filterPicker
+                SearchField(text: $search)
+                    .frame(width: 170)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                changesTitle
+                HStack(spacing: 12) {
+                    filterPicker
+                    SearchField(text: $search)
+                        .frame(minWidth: 120, maxWidth: 220)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            SearchField(text: $search)
-                .frame(width: 170)
         }
         .padding(.vertical, 10)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var changesTitle: some View {
+        Text("变动明细")
+            .font(.headline)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var filterPicker: some View {
+        Picker("显示", selection: $filter) {
+            ForEach(ChangeFilter.allCases) { filter in
+                Text(filter.title(count: count(filter))).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 
     @ViewBuilder private var changeRows: some View {

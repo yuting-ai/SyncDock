@@ -4,14 +4,10 @@ struct MenuView: View {
     let store: SyncStore
     @Environment(\.openWindow) private var openWindow
 
-    private func openEditor() {
-        openWindow(id: SyncDockApp.editorID)
-        NSApp.activate()
-    }
-
-    private func openHistory(_ task: SyncTask?) {
-        if let task { store.historyTaskID = task.id }
-        openWindow(id: SyncDockApp.historyID)
+    /// Opens the main window on `task`; new and edited tasks open in its sheet.
+    private func openMain(_ task: SyncTask? = nil) {
+        if let task { store.selectedTaskID = task.id }
+        openWindow(id: SyncDockApp.mainID)
         NSApp.activate()
     }
 
@@ -37,9 +33,9 @@ struct MenuView: View {
             } else {
                 VStack(spacing: 2) {
                     ForEach(store.tasks) { task in
-                        TaskRow(task: task, store: store, onHistory: { openHistory(task) }) {
+                        TaskRow(task: task, store: store, onHistory: { openMain(task) }) {
+                            openMain(task)
                             store.beginEditing(task)
-                            openEditor()
                         }
                     }
                 }
@@ -82,8 +78,8 @@ struct MenuView: View {
             }
             .help("刷新")
             Button {
+                openMain()
                 store.beginNewTask()
-                openEditor()
             } label: {
                 Image(systemName: "plus")
             }
@@ -119,7 +115,7 @@ struct MenuView: View {
                 .toggleStyle(.checkbox)
                 .font(.callout)
             Spacer()
-            Button("同步记录") { openHistory(nil) }
+            Button("打开 SyncDock") { openMain() }
             Button("退出") { NSApp.terminate(nil) }
         }
         .buttonStyle(.borderless)

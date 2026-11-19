@@ -136,6 +136,19 @@
         }
       }
     },
+    "SyncDock": {
+      "shouldTranslate": false
+    },
+    "SyncDock 主窗口": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SyncDock Main Window"
+          }
+        }
+      }
+    },
     "SyncDock 会按计划在后台同步文件夹。开始之前，先完成下面这一步。": {
       "localizations": {
         "en": {
@@ -426,6 +439,16 @@
         }
       }
     },
+    "任务和同步记录": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tasks and sync history"
+          }
+        }
+      }
+    },
     "任务运行后，每次同步的结果都会显示在这里。": {
       "localizations": {
         "en": {
@@ -506,6 +529,16 @@
         }
       }
     },
+    "全部同步": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync All"
+          }
+        }
+      }
+    },
     "删除 %lld": {
       "localizations": {
         "en": {
@@ -532,6 +565,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Delete Task"
+          }
+        }
+      }
+    },
+    "删除任务…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Task…"
           }
         }
       }
@@ -596,22 +639,32 @@
         }
       }
     },
-    "只在你点菜单栏里的 ▶ 时同步一次。": {
+    "只在你点「立即同步」时同步。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Syncs once each time you click ▶ in the menu bar."
+            "value": "Syncs only when you click Sync Now."
           }
         }
       }
     },
-    "同步任务": {
+    "只能排除源文件夹里面的项目。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sync Task"
+            "value": "Only items inside the source folder can be excluded."
+          }
+        }
+      }
+    },
+    "可以选择源文件夹里的文件夹或文件，也可以填名称（支持 * 和 ? 通配符），名称在每一层都会排除。被排除的项目不会同步，目标里已有的也不会被删除。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose folders or files inside the source, or enter a name (* and ? wildcards work); a name is excluded at every level. Excluded items aren't synced, and copies already in the destination aren't deleted."
           }
         }
       }
@@ -688,12 +741,12 @@
         }
       }
     },
-    "同步记录": {
+    "名为这个的项目，在每一层都会排除": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sync History"
+            "value": "Items with this name, excluded at every level"
           }
         }
       }
@@ -708,12 +761,42 @@
         }
       }
     },
+    "名称，例如 node_modules 或 *.log": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name, e.g. node_modules or *.log"
+          }
+        }
+      }
+    },
     "在 Finder 中打开 %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Open %@ in Finder"
+          }
+        }
+      }
+    },
+    "在 Finder 中打开源文件夹": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Source Folder in Finder"
+          }
+        }
+      }
+    },
+    "在 Finder 中打开目标文件夹": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Destination Folder in Finder"
           }
         }
       }
@@ -738,22 +821,22 @@
         }
       }
     },
-    "在菜单栏里点 ＋ 新建一个同步任务。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Click ＋ in the menu bar panel to create a sync task."
-          }
-        }
-      }
-    },
     "复制失败：%@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Could not copy: %@"
+          }
+        }
+      }
+    },
+    "完全磁盘访问权限": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full Disk Access"
           }
         }
       }
@@ -800,6 +883,16 @@
         }
       }
     },
+    "已开启": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granted"
+          }
+        }
+      }
+    },
     "已确认 SyncDock 拥有「完全磁盘访问权限」。": {
       "localizations": {
         "en": {
@@ -840,6 +933,16 @@
         }
       }
     },
+    "打开 SyncDock": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open SyncDock"
+          }
+        }
+      }
+    },
     "打开系统设置": {
       "localizations": {
         "en": {
@@ -870,6 +973,26 @@
         }
       }
     },
+    "排除": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exclude"
+          }
+        }
+      }
+    },
+    "排除 %lld 项": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld excluded"
+          }
+        }
+      }
+    },
     "排除隐藏文件（以 . 开头的文件和文件夹）": {
       "localizations": {
         "en": {
@@ -890,6 +1013,16 @@
         }
       }
     },
+    "数据": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data"
+          }
+        }
+      }
+    },
     "文件同步": {
       "localizations": {
         "en": {
@@ -906,6 +1039,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Added %lld"
+          }
+        }
+      }
+    },
+    "新建一个任务，把文件夹按计划同步到移动硬盘、云盘或其他文件夹。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create a task to sync a folder to an external drive, a cloud folder or another folder on a schedule."
+          }
+        }
+      }
+    },
+    "新建任务": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Task"
+          }
+        }
+      }
+    },
+    "新建任务…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Task…"
           }
         }
       }
@@ -1060,6 +1223,16 @@
         }
       }
     },
+    "更多操作": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More"
+          }
+        }
+      }
+    },
     "更新": {
       "localizations": {
         "en": {
@@ -1138,6 +1311,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Not selected"
+          }
+        }
+      }
+    },
+    "权限": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permissions"
           }
         }
       }
@@ -1222,12 +1405,32 @@
         }
       }
     },
+    "没有排除任何项目。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing is excluded."
+          }
+        }
+      }
+    },
     "没有符合条件的项目": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "No matching items"
+          }
+        }
+      }
+    },
+    "添加": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
           }
         }
       }
@@ -1282,12 +1485,42 @@
         }
       }
     },
+    "源文件夹里的这一项": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This item inside the source folder"
+          }
+        }
+      }
+    },
+    "登录后在菜单栏显示同步状态。定时同步由系统按时启动，即使 SyncDock 没有打开也会照常运行。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows sync status in the menu bar after you log in. Scheduled syncs are started by macOS on time, even when SyncDock isn't open."
+          }
+        }
+      }
+    },
     "登录时启动": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Open at Login"
+          }
+        }
+      }
+    },
+    "登录时启动 SyncDock": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open SyncDock at login"
           }
         }
       }
@@ -1382,6 +1615,16 @@
         }
       }
     },
+    "移动硬盘": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "External drive"
+          }
+        }
+      }
+    },
     "移动硬盘未连接": {
       "localizations": {
         "en": {
@@ -1398,6 +1641,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "The drive isn’t connected, so this sync was skipped"
+          }
+        }
+      }
+    },
+    "移除": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove"
           }
         }
       }
@@ -1422,12 +1675,32 @@
         }
       }
     },
+    "立即同步所有任务": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync all tasks now"
+          }
+        }
+      }
+    },
     "编辑": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Edit"
+          }
+        }
+      }
+    },
+    "编辑…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit…"
           }
         }
       }
@@ -1660,6 +1933,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Choose…"
+          }
+        }
+      }
+    },
+    "选择源文件夹里不需要同步的文件夹或文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose folders or files in the source that shouldn't be synced"
+          }
+        }
+      }
+    },
+    "选择源文件夹里要排除的文件夹或文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose folders or files in the source to exclude"
           }
         }
       }

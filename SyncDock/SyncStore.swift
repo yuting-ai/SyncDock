@@ -125,15 +125,20 @@ final class SyncStore {
 
     // MARK: Editing
 
-    /// The task being edited in the editor window.
+    /// The task being edited in the editor sheet.
     var draft = TaskDraft()
+    /// Whether the main window shows the editor sheet for `draft`.
+    var isEditing = false
 
     func beginNewTask() {
         draft = TaskDraft()
+        isEditing = true
     }
 
     func beginEditing(_ task: SyncTask) {
         draft = task.draft
+        selectedTaskID = task.id
+        isEditing = true
     }
 
     func validationError() -> String? {
@@ -148,6 +153,7 @@ final class SyncStore {
         try Self.createFolderIfMissing(task.targetPath)
         try TaskFiles.save(task)
         draft.id = task.id
+        selectedTaskID = task.id
         refresh()
         return task
     }
@@ -162,6 +168,11 @@ final class SyncStore {
         if let task = tasks.first(where: { $0.id == id }) { runNow(task) }
     }
 
+    /// Starts every task that isn't running and whose drive is connected.
+    func runAll() {
+        for task in tasks where !isRunning(task) && !task.isVolumeMissing { runNow(task) }
+    }
+
     /// Creates `path` when only its last component is missing. Deeper gaps (e.g. an unplugged
     /// drive's mount point) are left alone so nothing gets written onto the internal disk.
     private static func createFolderIfMissing(_ path: String) throws {
@@ -172,8 +183,12 @@ final class SyncStore {
         try fm.createDirectory(at: url, withIntermediateDirectories: false)
     }
 
-    /// The task shown in the history window.
-    var historyTaskID: String?
+    /// The task selected in the main window.
+    var selectedTaskID: String?
+
+    var selectedTask: SyncTask? {
+        tasks.first { $0.id == selectedTaskID } ?? tasks.first
+    }
 
     func setLaunchAtLogin(_ enabled: Bool) {
         do {

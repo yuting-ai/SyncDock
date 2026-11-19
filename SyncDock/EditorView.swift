@@ -1,8 +1,11 @@
 import SwiftUI
 
+/// The new/edit task sheet of the main window.
 struct EditorView: View {
     @Bindable var store: SyncStore
-    @Environment(\.dismissWindow) private var dismissWindow
+    /// A fixed height instead of fitting the window, for layout snapshots of the whole form.
+    var fixedHeight: CGFloat? = nil
+    @Environment(\.dismiss) private var dismiss
     @State private var saveError: String?
     @State private var confirmingDelete = false
 
@@ -41,6 +44,16 @@ struct EditorView: View {
                         .padding(.leading, 18)
                 }
 
+                Section {
+                    ExcludeList(rules: $store.draft.excludes, source: draft.source)
+                } header: {
+                    Text("排除")
+                } footer: {
+                    Text("可以选择源文件夹里的文件夹或文件，也可以填名称（支持 * 和 ? 通配符），名称在每一层都会排除。被排除的项目不会同步，目标里已有的也不会被删除。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("什么时候同步") {
                     Picker("运行方式", selection: $store.draft.schedule.kind) {
                         Text("仅手动").tag(Schedule.Kind.manual)
@@ -52,7 +65,7 @@ struct EditorView: View {
 
                     switch draft.schedule.kind {
                     case .manual:
-                        Text("只在你点菜单栏里的 ▶ 时同步一次。")
+                        Text("只在你点「立即同步」时同步。")
                             .font(.callout).foregroundStyle(.secondary)
                     case .daily:
                         timePicker
@@ -67,14 +80,14 @@ struct EditorView: View {
             Divider()
             footer.padding(16)
         }
-        .frame(width: 500)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 540)
+        .frame(minHeight: fixedHeight ?? 460, idealHeight: fixedHeight ?? 700, maxHeight: fixedHeight ?? 820)
         .navigationTitle(draft.isNew ? String(localized: "新建同步任务")
                                      : String(localized: "编辑：\(existingTask?.name ?? draft.name)"))
         .confirmationDialog("删除任务「\(draft.name)」？", isPresented: $confirmingDelete) {
             Button("删除任务", role: .destructive) {
                 if let existingTask { store.delete(existingTask) }
-                dismissWindow(id: SyncDockApp.editorID)
+                dismiss()
             }
         } message: {
             Text("只删除这个同步任务和它的定时设置（会移到废纸篓），已经同步过去的文件不受影响。")
@@ -138,7 +151,7 @@ struct EditorView: View {
                     .foregroundStyle(saveError == nil ? Color.secondary : .red)
                     .lineLimit(2)
             }
-            Button("取消") { dismissWindow(id: SyncDockApp.editorID) }
+            Button("取消") { dismiss() }
                 .keyboardShortcut(.cancelAction)
             Button("保存并同步") { save(runAfter: true) }
                 .disabled(store.validationError() != nil || draft.requiresVolumeMissing)
@@ -153,7 +166,7 @@ struct EditorView: View {
             let task = try store.saveDraft()
             saveError = nil
             if runAfter { store.runNow(id: task.id) }
-            dismissWindow(id: SyncDockApp.editorID)
+            dismiss()
         } catch {
             saveError = String(localized: "保存失败：\(error.localizedDescription)")
         }
@@ -223,5 +236,85 @@ private struct WeekdayPicker: View {
                 }
             }
         }
+    }
+}
+
+
+/// The task's exclusions: items picked inside the source (stored as "/relative/path") and name patterns.
+private struct ExcludeList: View {
+    @Binding var rules: [String]
+    let source: String
+    @State private var newName = ""
+    @State private var pickError: String?
+
+    var body: some View {
+        if rules.isEmpty {
+            Text("没有排除任何项目。")
+                .foregroundStyle(.secondary)
+        }
+        ForEach(rules, id: \.self) { rule in
+            HStack(spacing: 8) {
+                let isPath = ExcludeRules.parse(rule).map { if case .path = $0 { true } else { false } } ?? false
+                Image(systemName: isPath ? "folder" : "tag")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Text(isPath ? String(rule.drop { $0 == "/" }) : rule)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(isPath ? String(localized: "源文件夹里的这一项") : String(localized: "名为这个的项目，在每一层都会排除"))
+                Spacer()
+                Button {
+                    rules.removeAll { $0 == rule }
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("移除")
+            }
+        }
+        HStack(spacing: 8) {
+            TextField("名称", text: $newName, prompt: Text("名称，例如 node_modules 或 *.log"))
+                .labelsHidden()
+                .onSubmit(addName)
+            Button("添加", action: addName)
+                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("选择…", action: choose)
+                .disabled(source.isEmpty)
+                .help("选择源文件夹里要排除的文件夹或文件")
+        }
+        if let pickError {
+            Text(pickError)
+                .font(.callout)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func addName() {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        if !rules.contains(name) { rules.append(name) }
+        newName = ""
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = String(localized: "排除")
+        panel.message = String(localized: "选择源文件夹里不需要同步的文件夹或文件")
+        panel.directoryURL = URL(filePath: source)
+        NSApp.activate()
+        guard panel.runModal() == .OK else { return }
+        let root = URL(filePath: source).standardizedFileURL.folderPath + "/"
+        var outside = false
+        for url in panel.urls {
+            let path = url.standardizedFileURL.folderPath
+            guard path.hasPrefix(root) else { outside = true; continue }
+            let rule = "/" + path.dropFirst(root.count)
+            if !rules.contains(rule) { rules.append(rule) }
+        }
+        pickError = outside ? String(localized: "只能排除源文件夹里面的项目。") : nil
     }
 }

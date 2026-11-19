@@ -38,7 +38,7 @@ import random
 latest_changes = [
     [("added", f"2026/11/IMG_{4810 + n}.HEIC", 2_500_000) for n in range(12)],
     [],
-    [("added", "SyncDock/HistoryView.swift", 31_200), ("updated", "SyncDock/SyncEngine.swift", 14_800),
+    [("added", "SyncDock/MainView.swift", 31_200), ("updated", "SyncDock/SyncEngine.swift", 14_800),
      ("updated", "SyncDock/SyncStore.swift", 9_600), ("folder", "SyncDock/Resources", None),
      ("added", "SyncDock/Resources/Icon.png", 412_000), ("updated", "README.md", 12_400),
      ("updated", ".git/index", 18_900), ("added", ".git/objects/4f/1c9e2a7b", 2_100),
@@ -85,7 +85,8 @@ for lang, names in tasks.items():
         tid = f"task-demo{i}"
         sched = {"weekdays": [7], **sched}
         json.dump({"id": tid, "name": name, "sourcePath": src, "targetFolder": dst, "createSubfolder": True,
-                   "mode": "update", "excludeHidden": True, "includeGit": git, "schedule": sched},
+                   "mode": "update", "excludeHidden": True, "includeGit": git,
+                   "excludes": ["/SyncDock/build", "node_modules"] if i == 2 else [], "schedule": sched},
                   open(os.path.join(task_dir, tid + ".json"), "w"))
         write_runs(log_dir, tid, i, last, items, size, lang)
 PY
@@ -98,7 +99,7 @@ for lang apple in en en zh zh-Hans; do
     render $lang $apple panel
     render $lang $apple editor task-demo2
     render $lang $apple setup setup
-    render $lang $apple history history:task-demo2
+    render $lang $apple main history:task-demo2
 done
 
 # Rounded corners, a soft shadow and transparent padding, like a window on screen.
