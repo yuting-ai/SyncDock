@@ -159,6 +159,16 @@
         }
       }
     },
+    "SyncDock 没有完全磁盘访问权限，无法同步。请在「系统设置 › 隐私与安全性 › 完全磁盘访问权限」里打开 SyncDock 的开关；如果已经打开，先关掉再重新打开。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SyncDock doesn't have Full Disk Access, so it couldn't sync. Turn on SyncDock in System Settings › Privacy & Security › Full Disk Access; if it's already on, turn it off and on again."
+          }
+        }
+      }
+    },
     "SyncDock 还没有完全磁盘访问权限": {
       "localizations": {
         "en": {
@@ -1401,6 +1411,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Daily at %@"
+          }
+        }
+      }
+    },
+    "没有完全磁盘访问权限，本次同步没有运行": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Full Disk Access, so this sync didn't run"
           }
         }
       }

@@ -120,8 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A menu bar app, but while one of its windows is open it acts like a normal app: Dock icon,
         // menus, ⌘Q. Closing the last window puts it back in the menu bar only.
         let center = NotificationCenter.default
+        // Occlusion changes also catch windows opened while SyncDock is in the background (the setup
+        // window at login), which never become key.
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification,
-                     NSWindow.didMiniaturizeNotification] {
+                     NSWindow.didMiniaturizeNotification, NSWindow.didChangeOcclusionStateNotification] {
             center.addObserver(forName: name, object: nil, queue: .main) { note in
                 let closing = name == NSWindow.willCloseNotification ? note.object as? NSWindow : nil
                 MainActor.assumeIsolated { Self.updateActivationPolicy(ignoring: closing) }

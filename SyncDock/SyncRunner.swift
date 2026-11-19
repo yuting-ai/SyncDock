@@ -18,6 +18,20 @@ enum SyncRunner {
         guard let lock = RunLock.acquire(id: id) else { return 0 }  // already running
         defer { close(lock) }
 
+        // Without Full Disk Access, reading the Desktop or a drive asks for permission in a prompt that
+        // nobody may be there to answer, and the run would hang on it. Report the problem instead.
+        // (Test runs with SYNCDOCK_HOME are started from a terminal, whose access is what counts then.)
+        if !Paths.isTestHome && !FullDiskAccess.isGranted {
+            let now = Date.now
+            let message = String(localized: "SyncDock 没有完全磁盘访问权限，无法同步。请在「系统设置 › 隐私与安全性 › 完全磁盘访问权限」里打开 SyncDock 的开关；如果已经打开，先关掉再重新打开。")
+            write(RunRecord(start: now, end: now, result: .error, items: 0, bytes: 0, errors: [message], warnings: [],
+                            counts: [:], source: task.sourcePath, target: task.targetPath, mode: task.mode),
+                  changes: [], id: task.id)
+            prune(id: id)
+            notify(title: "SyncDock: \(task.name)", message: String(localized: "没有完全磁盘访问权限，本次同步没有运行"))
+            return 1
+        }
+
         // launchd sends SIGTERM when the agent is unloaded (e.g. the task is edited mid-run).
         let cancellation = Cancellation()
         signal(SIGTERM, SIG_IGN)
