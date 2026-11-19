@@ -139,7 +139,7 @@ Requires Xcode 26 or later.
 open SyncDock.xcodeproj   # then press ⌘R
 ```
 
-Quit the installed SyncDock first, or you'll get two icons in the menu bar.
+Quit the installed SyncDock first, or you'll get two icons in the menu bar. Debug builds use the bundle ID `me.lepton.syncdock.debug`, so macOS keeps their privacy permissions apart from the installed app's: granting or changing Full Disk Access for a debug build never affects the release. To test background runs with a debug build, grant it Full Disk Access separately.
 
 | File | Contents |
 |---|---|

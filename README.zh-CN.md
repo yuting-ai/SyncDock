@@ -139,7 +139,7 @@ SyncDock（菜单栏 App）
 open SyncDock.xcodeproj   # 然后按 ⌘R 运行
 ```
 
-运行前先退出已安装的 SyncDock，否则菜单栏会出现两个图标。
+运行前先退出已安装的 SyncDock，否则菜单栏会出现两个图标。调试版的 Bundle ID 是 `me.lepton.syncdock.debug`，macOS 会把它的隐私权限和已安装的正式版分开记录：给调试版授权或改动「完全磁盘访问权限」，不会影响正式版。如果要用调试版测试后台同步，需要单独给它授权。
 
 | 文件 | 内容 |
 |---|---|
